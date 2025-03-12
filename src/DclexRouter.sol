@@ -41,7 +41,7 @@ contract DclexRouter is SafeCallback, Ownable, IDclexSwapCallback {
         uint256 maxInputAmount;
     }
 
-    mapping(address => DclexPool) private stockTokenToPool;
+    mapping(address => DclexPool) public stockTokenToPool;
     mapping(address => bool) private pools;
     PoolKey private ethUsdcPoolKey;
 
@@ -49,10 +49,8 @@ contract DclexRouter is SafeCallback, Ownable, IDclexSwapCallback {
 
     constructor(
         IPoolManager _uniswapV4PoolManager,
-        PoolKey memory _ethUsdcPoolKey,
-        address owner
+        PoolKey memory _ethUsdcPoolKey
     ) SafeCallback(_uniswapV4PoolManager) {
-        _transferOwnership(owner);
         ethUsdcPoolKey = _ethUsdcPoolKey;
     }
 

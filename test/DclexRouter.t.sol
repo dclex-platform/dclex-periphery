@@ -6,13 +6,16 @@ import {DclexPythMock} from "dclex-protocol/test/PythMock.sol";
 import {DclexRouter} from "src/DclexRouter.sol";
 import {DclexPool} from "dclex-protocol/src/DclexPool.sol";
 import {DeployDclex} from "dclex-protocol/script/DeployDclex.s.sol";
+import {ITransferVerifier} from "dclex-blockchain/contracts/interfaces/ITransferVerifier.sol";
+import {DeployRouterWithPools} from "../script/DeployDclexRouterWithPools.s.sol";
+import {HelperConfig} from "../script/HelperConfig.s.sol";
+import {HelperConfig as DclexProtocolHelperConfig} from "dclex-protocol/script/HelperConfig.s.sol";
 import {DigitalIdentity} from "dclex-blockchain/contracts/dclex/DigitalIdentity.sol";
 import {Factory} from "dclex-blockchain/contracts/dclex/Factory.sol";
 import {IFactory} from "dclex-blockchain/contracts/interfaces/IFactory.sol";
 import {Factory} from "dclex-blockchain/contracts/dclex/Factory.sol";
 import {Stock} from "dclex-blockchain/contracts/dclex/Stock.sol";
 import {USDCMock} from "dclex-blockchain/contracts/mocks/USDCMock.sol";
-import {SmartcontractIdentity} from "dclex-blockchain/contracts/dclex/SmartcontractIdentity.sol";
 import {TestBalance} from "dclex-protocol/test/TestBalance.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {PoolManager} from "@uniswap/v4-core/src/PoolManager.sol";
@@ -23,21 +26,23 @@ import {LiquidityAmounts} from "@uniswap/v4-core/test/utils/LiquidityAmounts.sol
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
+import {PoolModifyLiquidityTest} from "@uniswap/v4-core/src/test/PoolModifyLiquidityTest.sol";
 
-contract DclexRouterTest is Test, TestBalance, Deployers {
+
+contract DclexRouterTest is Test, TestBalance {
     bytes[] internal PYTH_DATA = new bytes[](0);
-    bytes32 internal constant AAPL_PRICE_FEED_ID = bytes32(uint256(0x1));
-    bytes32 internal constant NVDA_PRICE_FEED_ID = bytes32(uint256(0x2));
-    bytes32 internal constant AMZN_PRICE_FEED_ID = bytes32(uint256(0x3));
-    bytes32 internal constant USDC_PRICE_FEED_ID = bytes32(uint256(0x4));
-    address private immutable ADMIN = makeAddr("admin");
+    bytes32 internal AAPL_PRICE_FEED_ID;
+    bytes32 internal NVDA_PRICE_FEED_ID;
+    bytes32 internal AMZN_PRICE_FEED_ID;
+    bytes32 internal USDC_PRICE_FEED_ID;
+    address private ADMIN = makeAddr("admin");
     address private immutable MASTER_ADMIN = makeAddr("master_admin");
     address private immutable POOL_ADMIN = makeAddr("pool_admin");
     address private immutable USER_1 = makeAddr("user_1");
     address private immutable USER_2 = makeAddr("user_2");
     PoolKey private ethUsdcPoolKey;
+    PoolManager private manager;
     DigitalIdentity internal digitalIdentity;
-    SmartcontractIdentity internal contractIdentity;
     Stock internal aaplStock;
     Stock internal nvdaStock;
     Stock internal amznStock;
@@ -48,6 +53,7 @@ contract DclexRouterTest is Test, TestBalance, Deployers {
     DclexPool private aaplPool;
     DclexPool internal nvdaPool;
     DclexPool internal amznPool;
+    PoolModifyLiquidityTest private modifyLiquidityRouter;
 
     event PoolSetForToken(address token, address pool);
     event SwapExecuted(
@@ -59,20 +65,15 @@ contract DclexRouterTest is Test, TestBalance, Deployers {
         address recipient
     );
 
+    receive() external payable {}
+
     function setUp() public {
-        usdcToken = new USDCMock("USDC", "USD Coin");
-        pythMock = new DclexPythMock();
-        vm.deal(address(pythMock), 1 ether);
-        pythMock.updatePrice(AAPL_PRICE_FEED_ID, 20 ether);
-        pythMock.updatePrice(NVDA_PRICE_FEED_ID, 30 ether);
-        pythMock.updatePrice(USDC_PRICE_FEED_ID, 1 ether);
         DeployDclex deployer = new DeployDclex();
         DeployDclex.DclexContracts memory contracts = deployer.run(
             ADMIN,
             MASTER_ADMIN
         );
         digitalIdentity = contracts.digitalIdentity;
-        contractIdentity = contracts.contractIdentity;
         stocksFactory = contracts.stocksFactory;
         vm.startPrank(ADMIN);
         stocksFactory.createStocks("Apple", "AAPL");
@@ -82,49 +83,38 @@ contract DclexRouterTest is Test, TestBalance, Deployers {
         aaplStock = Stock(contracts.stocksFactory.stocks("AAPL"));
         nvdaStock = Stock(contracts.stocksFactory.stocks("NVDA"));
         amznStock = Stock(contracts.stocksFactory.stocks("AMZN"));
-        aaplPool = new DclexPool(
-            IFactory(address(stocksFactory)),
-            pythMock.getPyth(),
-            aaplStock,
-            usdcToken,
-            AAPL_PRICE_FEED_ID,
-            USDC_PRICE_FEED_ID,
-            POOL_ADMIN
-        );
-        nvdaPool = new DclexPool(
-            IFactory(address(stocksFactory)),
-            pythMock.getPyth(),
-            nvdaStock,
-            usdcToken,
-            NVDA_PRICE_FEED_ID,
-            USDC_PRICE_FEED_ID,
-            POOL_ADMIN
-        );
-        amznPool = new DclexPool(
-            IFactory(address(stocksFactory)),
-            pythMock.getPyth(),
-            amznStock,
-            usdcToken,
-            AMZN_PRICE_FEED_ID,
-            USDC_PRICE_FEED_ID,
-            POOL_ADMIN
-        );
+        HelperConfig.NetworkConfig memory config;
+        DeployRouterWithPools routerDeployer = new DeployRouterWithPools();
+        address pythAddress;
+        DclexProtocolHelperConfig dclexProtocolHelperConfig;
+        (dclexRouter, config, pythAddress, dclexProtocolHelperConfig) = routerDeployer.run(stocksFactory);
+        usdcToken = USDCMock(address(config.usdcToken));
+        manager = config.uniswapV4PoolManager;
+        ethUsdcPoolKey = config.ethUsdcPoolKey;
+        ADMIN = config.admin;
+        pythMock = new DclexPythMock(pythAddress);
+        vm.deal(address(pythMock), 1 ether);
+        AAPL_PRICE_FEED_ID = dclexProtocolHelperConfig.getPriceFeedId("AAPL");
+        NVDA_PRICE_FEED_ID = dclexProtocolHelperConfig.getPriceFeedId("NVDA");
+        USDC_PRICE_FEED_ID = dclexProtocolHelperConfig.getPriceFeedId("USDC");
+        pythMock.updatePrice(AAPL_PRICE_FEED_ID, 20 ether);
+        pythMock.updatePrice(NVDA_PRICE_FEED_ID, 30 ether);
+        pythMock.updatePrice(USDC_PRICE_FEED_ID, 1 ether);
+        aaplPool = dclexRouter.stockTokenToPool(address(aaplStock));
+        nvdaPool = dclexRouter.stockTokenToPool(address(nvdaStock));
+        amznPool = dclexRouter.stockTokenToPool(address(amznStock));
         vm.startPrank(ADMIN);
-        contractIdentity.mintAdmin(address(aaplPool));
-        contractIdentity.mintAdmin(address(nvdaPool));
-        contractIdentity.mintAdmin(address(amznPool));
+        dclexRouter.setPool(address(amznStock), DclexPool(address(0)));
+        digitalIdentity.mintAdmin(address(aaplPool), 0, "", ITransferVerifier(address(0)));
+        digitalIdentity.mintAdmin(address(nvdaPool), 0, "", ITransferVerifier(address(0)));
+        digitalIdentity.mintAdmin(address(amznPool), 0, "", ITransferVerifier(address(0)));
         vm.stopPrank();
         setupAccount(address(this));
         setupAccount(USER_1);
         setupAccount(USER_2);
+        setupUniswapV4();
         aaplPool.initialize(100 ether, 2000e6, PYTH_DATA);
         nvdaPool.initialize(100 ether, 2000e6, PYTH_DATA);
-        setupUniswapV4();
-        dclexRouter = new DclexRouter(manager, ethUsdcPoolKey, ADMIN);
-        vm.startPrank(ADMIN);
-        dclexRouter.setPool(address(aaplStock), aaplPool);
-        dclexRouter.setPool(address(nvdaStock), nvdaPool);
-        vm.stopPrank();
         vm.startPrank(address(this));
         aaplStock.approve(address(dclexRouter), 100000 ether);
         nvdaStock.approve(address(dclexRouter), 100000 ether);
@@ -145,11 +135,7 @@ contract DclexRouterTest is Test, TestBalance, Deployers {
     function setupAccount(address account) private {
         usdcToken.mint(account, 1000000e6);
         vm.prank(ADMIN);
-        if (account.code.length == 0) {
-            digitalIdentity.mintAdmin(account, 0, "");
-        } else {
-            contractIdentity.mintAdmin(account);
-        }
+        digitalIdentity.mintAdmin(account, 0, "", ITransferVerifier(address(0)));
         vm.startPrank(MASTER_ADMIN);
         stocksFactory.forceMintStocks("AAPL", account, 100000 ether);
         stocksFactory.forceMintStocks("NVDA", account, 10000 ether);
@@ -162,16 +148,7 @@ contract DclexRouterTest is Test, TestBalance, Deployers {
     }
 
     function setupUniswapV4() private {
-        deployFreshManagerAndRouters();
-        Currency ethCurrency = Currency.wrap(address(0));
-        Currency usdcCurrency = Currency.wrap(address(usdcToken));
-        (ethUsdcPoolKey, ) = initPool(
-            ethCurrency,
-            usdcCurrency,
-            IHooks(address(0)),
-            3000,
-            4339505179874779662909440
-        );
+        modifyLiquidityRouter = new PoolModifyLiquidityTest(manager);
         (uint256 amount0Delta, ) = LiquidityAmounts.getAmountsForLiquidity(
             4339505179874779662909440,
             TickMath.getSqrtPriceAtTick(-200040),
@@ -189,7 +166,7 @@ contract DclexRouterTest is Test, TestBalance, Deployers {
         modifyLiquidityRouter.modifyLiquidity{value: amount0Delta + 1}(
             ethUsdcPoolKey,
             addLiquidityParams,
-            ZERO_BYTES
+            ""
         );
     }
 
