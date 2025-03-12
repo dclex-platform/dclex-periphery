@@ -2,6 +2,7 @@
 pragma solidity ^0.8.26;
 
 import {Test, console} from "forge-std/Test.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {DclexPythMock} from "dclex-protocol/test/PythMock.sol";
 import {DclexRouter} from "src/DclexRouter.sol";
 import {DclexPool} from "dclex-protocol/src/DclexPool.sol";
@@ -1679,7 +1680,7 @@ contract DclexRouterTest is Test, TestBalance {
     }
 
     function testSetPoolRevertsWhenCalledByNotAnOwner() external {
-        vm.expectRevert("Ownable: caller is not the owner");
+        vm.expectPartialRevert(Ownable.OwnableUnauthorizedAccount.selector);
         dclexRouter.setPool(address(nvdaStock), nvdaPool);
     }
 

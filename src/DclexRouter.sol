@@ -50,7 +50,7 @@ contract DclexRouter is SafeCallback, Ownable, IDclexSwapCallback {
     constructor(
         IPoolManager _uniswapV4PoolManager,
         PoolKey memory _ethUsdcPoolKey
-    ) SafeCallback(_uniswapV4PoolManager) {
+    ) SafeCallback(_uniswapV4PoolManager) Ownable(msg.sender) {
         ethUsdcPoolKey = _ethUsdcPoolKey;
     }
 
