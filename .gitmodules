@@ -4,9 +4,6 @@
 [submodule "lib/dclex-blockchain"]
 	path = lib/dclex-blockchain
 	url = https://github.com/dclex-platform/dclex-blockchain
-[submodule "lib/openzeppelin-contracts"]
-	path = lib/openzeppelin-contracts
-	url = https://github.com/OpenZeppelin/openzeppelin-contracts
 [submodule "lib/dclex-protocol"]
 	path = lib/dclex-protocol
 	url = https://github.com/dclex-platform/dclex-protocol
@@ -19,3 +16,6 @@
 [submodule "lib/v4-periphery"]
 	path = lib/v4-periphery
 	url = https://github.com/Uniswap/v4-periphery
+[submodule "lib/openzeppelin-contracts"]
+	path = lib/openzeppelin-contracts
+	url = https://github.com/OpenZeppelin/openzeppelin-contracts
