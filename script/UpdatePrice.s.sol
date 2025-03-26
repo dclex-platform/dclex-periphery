@@ -13,8 +13,6 @@ contract UpdatePrice is Script {
         uint256 price
     ) external {
         DclexProtocolHelperConfig dclexProtocolHelperConfig = new DclexProtocolHelperConfig();
-        DclexProtocolHelperConfig.NetworkConfig
-            memory protocolConfig = dclexProtocolHelperConfig.getConfig();
         bytes32 priceFeedId = dclexProtocolHelperConfig.getPriceFeedId(
             stockSymbol
         );
@@ -33,8 +31,6 @@ contract UpdatePrice is Script {
         vm.startBroadcast();
         mockPyth.updatePriceFeeds{value: value}(updateData);
         vm.stopBroadcast();
-        console.log(mockPyth.getPriceNoOlderThan(priceFeedId, 60).price);
-        console.log(mockPyth.getPriceNoOlderThan(priceFeedId, 60).expo);
     }
 
     function createPriceFeedUpdateData(

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
 import {Script, console} from "forge-std/Script.sol";
@@ -13,7 +13,8 @@ contract InitializePool is Script {
         address stocksFactoryAddress,
         string[] calldata stockSymbols,
         uint256 stockAmount,
-        uint256 usdcAmount
+        uint256 usdcAmount,
+        bytes[] calldata pythData
     ) external {
         DclexRouter dclexRouter = DclexRouter(payable(routerAddress));
         Factory stocksFactory = Factory(stocksFactoryAddress);
@@ -23,7 +24,7 @@ contract InitializePool is Script {
             DclexPool pool = dclexRouter.stockTokenToPool(stockAddress);
             pool.stockToken().approve(address(pool), stockAmount);
             pool.usdcToken().approve(address(pool), usdcAmount);
-            pool.initialize(stockAmount, usdcAmount, new bytes[](0));
+            pool.initialize{value: 2}(stockAmount, usdcAmount, pythData);
         }
         vm.stopBroadcast();
     }
