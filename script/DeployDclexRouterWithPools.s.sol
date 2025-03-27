@@ -2,11 +2,11 @@
 pragma solidity ^0.8.26;
 
 import {Script} from "forge-std/Script.sol";
-import {IStock} from "dclex-blockchain/contracts/interfaces/IStock.sol";
+import {IStock} from "dclex-mint/contracts/interfaces/IStock.sol";
 import {DeployDclexPool} from "dclex-protocol/script/DeployDclexPool.s.sol";
 import {DclexPool} from "dclex-protocol/src/DclexPool.sol";
 import {HelperConfig as DclexProtocolHelperConfig} from "dclex-protocol/script/HelperConfig.s.sol";
-import {Factory} from "dclex-blockchain/contracts/dclex/Factory.sol";
+import {Factory} from "dclex-mint/contracts/dclex/Factory.sol";
 import {DclexRouter} from "src/DclexRouter.sol";
 import {HelperConfig as DclexPeripheryHelperConfig} from "./HelperConfig.s.sol";
 

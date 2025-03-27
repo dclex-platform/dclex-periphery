@@ -6,7 +6,7 @@ import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {PoolManager} from "@uniswap/v4-core/src/PoolManager.sol";
-import {USDCMock} from "dclex-blockchain/contracts/mocks/USDCMock.sol";
+import {USDCMock} from "dclex-mint/contracts/mocks/USDCMock.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 contract HelperConfig is Script {
