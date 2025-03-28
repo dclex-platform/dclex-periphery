@@ -4,7 +4,6 @@ pragma solidity ^0.8.26;
 import {Script, console} from "forge-std/Script.sol";
 import {Factory} from "dclex-mint/contracts/dclex/Factory.sol";
 import {DclexPool} from "dclex-protocol/src/DclexPool.sol";
-import {HelperConfig} from "./HelperConfig.s.sol";
 import {DclexRouter} from "../src/DclexRouter.sol";
 
 contract InitializePool is Script {

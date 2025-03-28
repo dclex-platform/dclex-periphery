@@ -9,6 +9,7 @@ import {DclexPool} from "dclex-protocol/src/DclexPool.sol";
 import {DeployDclex} from "dclex-protocol/script/DeployDclex.s.sol";
 import {ITransferVerifier} from "dclex-mint/contracts/interfaces/ITransferVerifier.sol";
 import {DeployRouterWithPools} from "../script/DeployDclexRouterWithPools.s.sol";
+import {InitializeUniswapV4Pool} from "../script/InitializeUniswapV4Pool.s.sol";
 import {HelperConfig} from "../script/HelperConfig.s.sol";
 import {HelperConfig as DclexProtocolHelperConfig} from "dclex-protocol/script/HelperConfig.s.sol";
 import {DigitalIdentity} from "dclex-mint/contracts/dclex/DigitalIdentity.sol";
@@ -113,7 +114,10 @@ contract DclexRouterTest is Test, TestBalance {
         setupAccount(address(this));
         setupAccount(USER_1);
         setupAccount(USER_2);
-        setupUniswapV4();
+        InitializeUniswapV4Pool uniswapV4PoolInitializer = new InitializeUniswapV4Pool();
+        vm.deal(address(DEFAULT_SENDER), 2 ether);
+        usdcToken.mint(address(DEFAULT_SENDER), 3000e6);
+        uniswapV4PoolInitializer.run(config);
         aaplPool.initialize(100 ether, 2000e6, PYTH_DATA);
         nvdaPool.initialize(100 ether, 2000e6, PYTH_DATA);
         vm.startPrank(address(this));
@@ -146,29 +150,6 @@ contract DclexRouterTest is Test, TestBalance {
         usdcToken.approve(address(aaplPool), 100000e6);
         usdcToken.approve(address(nvdaPool), 100000e6);
         vm.stopPrank();
-    }
-
-    function setupUniswapV4() private {
-        modifyLiquidityRouter = new PoolModifyLiquidityTest(manager);
-        (uint256 amount0Delta, ) = LiquidityAmounts.getAmountsForLiquidity(
-            4339505179874779662909440,
-            TickMath.getSqrtPriceAtTick(-200040),
-            TickMath.getSqrtPriceAtTick(-190020),
-            0.01 ether
-        );
-        IPoolManager.ModifyLiquidityParams
-            memory addLiquidityParams = IPoolManager.ModifyLiquidityParams({
-                tickLower: -200040,
-                tickUpper: -190020,
-                liquidityDelta: 0.01 ether,
-                salt: bytes32(0)
-            });
-        usdcToken.approve(address(modifyLiquidityRouter), 100000e6);
-        modifyLiquidityRouter.modifyLiquidity{value: amount0Delta + 1}(
-            ethUsdcPoolKey,
-            addLiquidityParams,
-            ""
-        );
     }
 
     function testBuyExactOutputCallsSwapExactOutputInGivenPool() external {

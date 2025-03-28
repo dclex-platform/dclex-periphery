@@ -61,7 +61,9 @@ contract HelperConfig is Script {
         address admin = makeAddr("admin");
         Currency ethCurrency = Currency.wrap(address(0));
         Currency usdcCurrency = Currency.wrap(address(usdcToken));
+        vm.startBroadcast();
         PoolManager manager = new PoolManager(address(this));
+        vm.stopBroadcast();
         PoolKey memory ethUsdcPoolKey = PoolKey(
             ethCurrency,
             usdcCurrency,
@@ -69,7 +71,6 @@ contract HelperConfig is Script {
             int24((3000 / 100) * 2),
             IHooks(address(0))
         );
-        manager.initialize(ethUsdcPoolKey, 4339505179874779662909440);
         return
             NetworkConfig({
                 uniswapV4PoolManager: manager,
@@ -77,11 +78,5 @@ contract HelperConfig is Script {
                 usdcToken: usdcToken,
                 admin: admin
             });
-    }
-
-    function getPriceFeedId(
-        string memory symbol
-    ) public view returns (bytes32) {
-        return 0x0;
     }
 }
