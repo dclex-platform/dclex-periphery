@@ -12,13 +12,17 @@ contract InitializePool is Script {
         address stocksFactoryAddress,
         string[] calldata stockSymbols,
         uint256 stockAmount,
-        uint256 usdcAmount,
-        bytes[] calldata pythData
+        uint256 usdcAmount
     ) external {
+        string[] memory inputs = new string[](2);
+        inputs[0] = "./getPythData.sh";
+        bytes[] memory pythData = new bytes[](1);
         DclexRouter dclexRouter = DclexRouter(payable(routerAddress));
         Factory stocksFactory = Factory(stocksFactoryAddress);
-        vm.startBroadcast(vm.envUint("PRIVATE_KEY"));
+        vm.startBroadcast();
         for (uint256 i = 0; i < stockSymbols.length; ++i) {
+            inputs[1] = stockSymbols[i];
+            pythData[0] = vm.parseBytes(vm.toString(vm.ffi(inputs)));
             address stockAddress = stocksFactory.stocks(stockSymbols[i]);
             DclexPool pool = dclexRouter.stockTokenToPool(stockAddress);
             pool.stockToken().approve(address(pool), stockAmount);
