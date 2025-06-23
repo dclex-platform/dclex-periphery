@@ -17,14 +17,25 @@ contract UpdatePrice is Script {
             stockSymbol
         );
         IPyth mockPyth = IPyth(pyth);
-        bytes[] memory updateData = new bytes[](1);
-        updateData[0] = createPriceFeedUpdateData(
+        bytes[] memory updateData = new bytes[](2);
+        updateData[0] = createMockPriceFeedUpdateData(
             priceFeedId,
             int64(uint64(price / 1e10)),
             10,
             -8,
             int64(uint64(price)),
             10,
+            uint64(block.timestamp),
+            uint64(block.timestamp)
+        );
+        updateData[1] = createMockPriceFeedUpdateData(
+            dclexProtocolHelperConfig.getPriceFeedId("USDC"),
+            int64(uint64(price / 1e10)),
+            10,
+            -8,
+            int64(uint64(price)),
+            10,
+            uint64(block.timestamp),
             uint64(block.timestamp)
         );
         uint256 value = mockPyth.getUpdateFee(updateData);
@@ -33,14 +44,15 @@ contract UpdatePrice is Script {
         vm.stopBroadcast();
     }
 
-    function createPriceFeedUpdateData(
+    function createMockPriceFeedUpdateData(
         bytes32 id,
         int64 price,
         uint64 conf,
         int32 expo,
         int64 emaPrice,
         uint64 emaConf,
-        uint64 publishTime
+        uint64 publishTime,
+        uint64 prevPublishTime
     ) public pure returns (bytes memory priceFeedData) {
         PythStructs.PriceFeed memory priceFeed;
 
@@ -56,6 +68,6 @@ contract UpdatePrice is Script {
         priceFeed.emaPrice.expo = expo;
         priceFeed.emaPrice.publishTime = publishTime;
 
-        priceFeedData = abi.encode(priceFeed);
+        priceFeedData = abi.encode(priceFeed, prevPublishTime);
     }
 }

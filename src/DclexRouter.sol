@@ -32,6 +32,7 @@ contract DclexRouter is SafeCallback, Ownable, IDclexSwapCallback {
         uint256 amount;
         address swapper;
         address stockToken;
+        address recipient;
     }
 
     struct DclexSwapCallbackData {
@@ -114,7 +115,11 @@ contract DclexRouter is SafeCallback, Ownable, IDclexSwapCallback {
                 revert DclexRouter__InputTooHigh();
             }
         } else {
-            IERC20(token).transferFrom(data.payer, msg.sender, amount);
+            if (data.payer == address(this)) {
+                IERC20(token).transfer(msg.sender, amount);
+            } else {
+                IERC20(token).transferFrom(data.payer, msg.sender, amount);
+            }
         }
     }
 
@@ -204,7 +209,26 @@ contract DclexRouter is SafeCallback, Ownable, IDclexSwapCallback {
             operation,
             amount,
             swapper,
-            stockToken
+            stockToken,
+            address(0)
+        );
+        bytes memory result = poolManager.unlock(abi.encode(callbackData));
+        return abi.decode(result, (uint128));
+    }
+
+    function _executeUniswapOperation(
+        UniswapOperation operation,
+        uint256 amount,
+        address payer,
+        address recipient,
+        address stockToken
+    ) private returns (uint128) {
+        UniswapCallbackData memory callbackData = UniswapCallbackData(
+            operation,
+            amount,
+            payer,
+            stockToken,
+            recipient
         );
         bytes memory result = poolManager.unlock(abi.encode(callbackData));
         return abi.decode(result, (uint128));
@@ -225,7 +249,7 @@ contract DclexRouter is SafeCallback, Ownable, IDclexSwapCallback {
             usdcAmount = _getPool(inputToken).swapExactInput{value: msg.value}(
                 false,
                 exactInputAmount,
-                msg.sender,
+                address(this),
                 abi.encode(
                     DclexSwapCallbackData(msg.sender, false, address(0), 0)
                 ),
@@ -239,6 +263,7 @@ contract DclexRouter is SafeCallback, Ownable, IDclexSwapCallback {
                 UniswapOperation.EthToUsdcExactInput,
                 exactInputAmount,
                 msg.sender,
+                address(this),
                 address(0)
             );
         }
@@ -248,7 +273,7 @@ contract DclexRouter is SafeCallback, Ownable, IDclexSwapCallback {
                 usdcAmount,
                 msg.sender,
                 abi.encode(
-                    DclexSwapCallbackData(msg.sender, false, address(0), 0)
+                    DclexSwapCallbackData(address(this), false, address(0), 0)
                 ),
                 new bytes[](0)
             );
@@ -314,7 +339,7 @@ contract DclexRouter is SafeCallback, Ownable, IDclexSwapCallback {
             (UniswapCallbackData)
         );
         if (data.operation == UniswapOperation.EthToUsdcExactInput) {
-            return _uniswapEthToUsdcExactInput(data.amount, data.swapper);
+            return _uniswapEthToUsdcExactInput(data.amount, data.recipient);
         } else if (data.operation == UniswapOperation.UsdcToEthExactInput) {
             return _uniswapUsdcToEthExactInput(data.amount, data.swapper);
         } else if (data.operation == UniswapOperation.EthToUsdcExactOutput) {
@@ -342,8 +367,7 @@ contract DclexRouter is SafeCallback, Ownable, IDclexSwapCallback {
         uint128 amount0 = uint128(delta.amount0());
         uint128 amount1 = uint128(-delta.amount1());
         poolManager.sync(ethUsdcPoolKey.currency1);
-        IERC20(Currency.unwrap(ethUsdcPoolKey.currency1)).transferFrom(
-            recipient,
+        IERC20(Currency.unwrap(ethUsdcPoolKey.currency1)).transfer(
             address(poolManager),
             amount1
         );

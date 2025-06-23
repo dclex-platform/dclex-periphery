@@ -25,8 +25,8 @@ contract InitializeUniswapV4Pool is Script {
 
     function run(HelperConfig.NetworkConfig memory config) public {
         int24 tickSpacing = 60;
-        uint256 ethAmount = 0.01 ether;
-        uint256 usdcAmount = 30e6;
+        uint256 ethAmount = 1 ether;
+        uint256 usdcAmount = 3000e6;
         uint160 sqrtPriceX96 = sqrtX96(ETH_USDC_PRICE);
         uint160 sqrtPriceAX96 = sqrtX96(ETH_USDC_PRICE - PRICE_RANGE);
         uint160 sqrtPriceBX96 = sqrtX96(ETH_USDC_PRICE + PRICE_RANGE);

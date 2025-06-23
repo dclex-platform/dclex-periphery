@@ -87,32 +87,26 @@ contract DclexRouterGasTest is Test {
         pythMock.updatePrice(USDC_PRICE_FEED_ID, 1 ether);
         aaplPool = dclexRouter.stockTokenToPool(address(aaplStock));
         nvdaPool = dclexRouter.stockTokenToPool(address(nvdaStock));
-        vm.prank(ADMIN);
-        digitalIdentity.mintAdmin(
-            address(aaplPool),
-            0,
-            "",
-            ITransferVerifier(address(0))
-        );
-        vm.prank(ADMIN);
-        digitalIdentity.mintAdmin(
-            address(nvdaPool),
-            0,
-            "",
-            ITransferVerifier(address(0))
-        );
         setupAccount(address(this));
-        aaplPool.initialize(100 ether, 2000e6, new bytes[](0));
-        nvdaPool.initialize(100 ether, 2000e6, new bytes[](0));
-        InitializeUniswapV4Pool uniswapV4PoolInitializer = new InitializeUniswapV4Pool();
-        vm.deal(address(DEFAULT_SENDER), 2 ether);
-        usdcToken.mint(address(DEFAULT_SENDER), 3000e6);
-        uniswapV4PoolInitializer.run(config);
         vm.startPrank(address(this));
         aaplStock.approve(address(dclexRouter), 100000 ether);
         nvdaStock.approve(address(dclexRouter), 100000 ether);
         usdcToken.approve(address(dclexRouter), 100000 ether);
         vm.stopPrank();
+
+        vm.startPrank(address(this));
+        aaplStock.approve(address(aaplPool), 100000 ether);
+        nvdaStock.approve(address(nvdaPool), 100000 ether);
+        usdcToken.approve(address(aaplPool), 100000e6);
+        usdcToken.approve(address(nvdaPool), 100000 ether);
+        vm.stopPrank();
+        aaplPool.initialize(100 ether, 2000e6, new bytes[](0));
+        nvdaPool.initialize(100 ether, 2000e6, new bytes[](0));
+
+        InitializeUniswapV4Pool uniswapV4PoolInitializer = new InitializeUniswapV4Pool();
+        vm.deal(address(DEFAULT_SENDER), 2 ether);
+        usdcToken.mint(address(DEFAULT_SENDER), 3000e6);
+        uniswapV4PoolInitializer.run(config);
     }
 
     function setupAccount(address account) private {
@@ -128,12 +122,6 @@ contract DclexRouterGasTest is Test {
         stocksFactory.forceMintStocks("AAPL", account, 100000 ether);
         vm.prank(MASTER_ADMIN);
         stocksFactory.forceMintStocks("NVDA", account, 10000 ether);
-        vm.startPrank(account);
-        aaplStock.approve(address(aaplPool), 100000 ether);
-        nvdaStock.approve(address(nvdaPool), 100000 ether);
-        usdcToken.approve(address(aaplPool), 100000e6);
-        usdcToken.approve(address(nvdaPool), 100000 ether);
-        vm.stopPrank();
     }
 
     function testBuyStockExactOutput() external {
