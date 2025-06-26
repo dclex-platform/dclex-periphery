@@ -14,40 +14,71 @@ import {HelperConfig as DclexPeripheryHelperConfig} from "./HelperConfig.s.sol";
 
 contract DeployRouterWithPools is Script {
     function run(
-        Factory stocksFactory
+        Factory stocksFactory,
+        uint256 maxPriceStaleness
     )
         external
         returns (
             DclexRouter,
             DclexPeripheryHelperConfig.NetworkConfig memory,
             address,
-            DclexProtocolHelperConfig
+            DclexProtocolHelperConfig,
+            DclexPeripheryHelperConfig
         )
     {
+        DclexProtocolHelperConfig dclexProtocolHelperConfig;
+        DclexPeripheryHelperConfig.NetworkConfig memory config;
+        vm.startBroadcast();
         DclexPeripheryHelperConfig helperConfig = new DclexPeripheryHelperConfig();
-        DclexProtocolHelperConfig dclexProtocolHelperConfig = new DclexProtocolHelperConfig();
-        DclexProtocolHelperConfig.NetworkConfig
-            memory protocolConfig = dclexProtocolHelperConfig.getConfig();
-        DeployDclexPool dclexPoolDeployer = new DeployDclexPool();
-
-        DclexPeripheryHelperConfig.NetworkConfig memory config = helperConfig
-            .getConfig(protocolConfig.usdcToken);
-        uint256 symbolsCount = stocksFactory.getStocksCount();
-        DigitalIdentity digitalIdentity = DigitalIdentity(
-            address(stocksFactory.getDID())
-        );
+        vm.stopBroadcast();
+        {
+            dclexProtocolHelperConfig = new DclexProtocolHelperConfig();
+            DclexProtocolHelperConfig.NetworkConfig
+                memory protocolConfig = dclexProtocolHelperConfig.getConfig();
+            config = helperConfig.getConfig(protocolConfig.usdcToken);
+        }
         vm.startBroadcast();
         DclexRouter dclexRouter = new DclexRouter(
             config.uniswapV4PoolManager,
             config.ethUsdcPoolKey
         );
         vm.stopBroadcast();
+        deployDclexPools(
+            dclexRouter,
+            stocksFactory,
+            dclexProtocolHelperConfig,
+            maxPriceStaleness
+        );
+        vm.startBroadcast();
+        dclexRouter.transferOwnership(config.admin);
+        vm.stopBroadcast();
+        return (
+            dclexRouter,
+            config,
+            address(dclexProtocolHelperConfig.getConfig().pyth),
+            dclexProtocolHelperConfig,
+            helperConfig
+        );
+    }
+
+    function deployDclexPools(
+        DclexRouter dclexRouter,
+        Factory stocksFactory,
+        DclexProtocolHelperConfig dclexProtocolHelperConfig,
+        uint256 maxPriceStaleness
+    ) private {
+        DeployDclexPool dclexPoolDeployer = new DeployDclexPool();
+        DigitalIdentity digitalIdentity = DigitalIdentity(
+            address(stocksFactory.getDID())
+        );
+        uint256 symbolsCount = stocksFactory.getStocksCount();
         for (uint256 i = 0; i < symbolsCount; ++i) {
             string memory symbol = stocksFactory.symbols(i);
             address stockAddress = stocksFactory.stocks(symbol);
             DclexPool dclexPool = dclexPoolDeployer.run(
                 IStock(stockAddress),
-                dclexProtocolHelperConfig
+                dclexProtocolHelperConfig,
+                maxPriceStaleness
             );
             vm.startBroadcast();
             dclexRouter.setPool(stockAddress, dclexPool);
@@ -59,10 +90,5 @@ contract DeployRouterWithPools is Script {
             );
             vm.stopBroadcast();
         }
-        vm.startBroadcast();
-        dclexRouter.transferOwnership(config.admin);
-        vm.stopBroadcast();
-        address pyth = address(dclexProtocolHelperConfig.getConfig().pyth);
-        return (dclexRouter, config, pyth, dclexProtocolHelperConfig);
     }
 }

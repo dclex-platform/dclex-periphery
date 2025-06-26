@@ -15,12 +15,12 @@ contract InitializeUniswapV4Pool is Script {
     uint256 private ETH_USDC_PRICE = 3000;
     uint256 private constant PRICE_RANGE = 10;
 
-    function run(IERC20 usdcToken) external {
-        HelperConfig helperConfig = new HelperConfig();
-        HelperConfig.NetworkConfig memory config = helperConfig.getConfig(
-            usdcToken
-        );
-        run(config);
+    function run(HelperConfig helperConfig, IERC20 usdcToken) external {
+        vm.startBroadcast();
+        HelperConfig.NetworkConfig memory networkConfig = helperConfig
+            .getConfig(usdcToken);
+        vm.stopBroadcast();
+        run(networkConfig);
     }
 
     function run(HelperConfig.NetworkConfig memory config) public {
@@ -64,7 +64,7 @@ contract InitializeUniswapV4Pool is Script {
         vm.stopBroadcast();
     }
 
-    function sqrtX96(uint256 value) private returns (uint160) {
+    function sqrtX96(uint256 value) private pure returns (uint160) {
         return uint160((Math.sqrt(value * 1e24) * 2 ** 96) / 1e18);
     }
 }

@@ -90,7 +90,7 @@ contract DclexRouterTest is Test, TestBalance {
         DeployRouterWithPools routerDeployer = new DeployRouterWithPools();
         address pythAddress;
         DclexProtocolHelperConfig dclexProtocolHelperConfig;
-        (dclexRouter, config, pythAddress, dclexProtocolHelperConfig) = routerDeployer.run(stocksFactory);
+        (dclexRouter, config, pythAddress, dclexProtocolHelperConfig,) = routerDeployer.run(stocksFactory, 60);
         usdcToken = USDCMock(address(config.usdcToken));
         manager = config.uniswapV4PoolManager;
         ethUsdcPoolKey = config.ethUsdcPoolKey;
@@ -1132,7 +1132,7 @@ contract DclexRouterTest is Test, TestBalance {
         );
         assertBalanceNotChanged();
 
-        /*recordBalance(address(usdcToken), address(this));
+        recordBalance(address(usdcToken), address(this));
         dclexRouter.swapExactInput{value: 0.001 ether}(
             address(0),
             address(aaplStock),
@@ -1141,7 +1141,7 @@ contract DclexRouterTest is Test, TestBalance {
             block.timestamp + 1,
             PYTH_DATA
         );
-        assertBalanceNotChanged();*/
+        assertBalanceNotChanged();
 
         recordBalance(address(usdcToken), address(this));
         dclexRouter.swapExactInput(
@@ -1742,6 +1742,19 @@ contract DclexRouterTest is Test, TestBalance {
         vm.expectRevert(DclexRouter.DclexRouter__NotDclexPool.selector);
         vm.prank(address(amznPool));
         dclexRouter.dclexSwapCallback(address(aaplStock), 1 ether, data);
+    }
+
+    function testAllStockTokensReturnsAllCurrentlyRegisteredStockTokens() external {
+        address[] memory result = dclexRouter.allStockTokens();
+        assertEq(result.length, 2);
+        assertEq(result[0], address(aaplStock));
+        assertEq(result[1], address(nvdaStock));
+
+        vm.prank(ADMIN);
+        dclexRouter.setPool(address(aaplStock), DclexPool(address(0)));
+        result = dclexRouter.allStockTokens();
+        assertEq(result.length, 1);
+        assertEq(result[0], address(nvdaStock));
     }
 
     function testBuyExactOutputUpdatesPriceFeed() external {

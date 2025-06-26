@@ -42,6 +42,7 @@ contract DclexRouter is SafeCallback, Ownable, IDclexSwapCallback {
         uint256 maxInputAmount;
     }
 
+    address[] private stockTokens;
     mapping(address => DclexPool) public stockTokenToPool;
     mapping(address => bool) private pools;
     PoolKey private ethUsdcPoolKey;
@@ -71,12 +72,24 @@ contract DclexRouter is SafeCallback, Ownable, IDclexSwapCallback {
         _;
     }
 
+    function allStockTokens() external view returns (address[] memory) {
+        return stockTokens;
+    }
+
     function setPool(address token, DclexPool dclexPool) external onlyOwner {
         if (address(dclexPool) == address(0)) {
             DclexPool oldPool = stockTokenToPool[token];
             pools[address(oldPool)] = false;
+            for (uint256 i = 0; i < stockTokens.length; ++i) {
+                if (stockTokens[i] == token) {
+                    stockTokens[i] = stockTokens[stockTokens.length - 1];
+                    stockTokens.pop();
+                    break;
+                }
+            }
         } else {
             pools[address(dclexPool)] = true;
+            stockTokens.push(token);
         }
         stockTokenToPool[token] = dclexPool;
         emit PoolSetForToken(token, address(dclexPool));

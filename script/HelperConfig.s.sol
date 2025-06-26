@@ -21,6 +21,7 @@ contract HelperConfig is Script {
 
     uint256 public constant ETH_SEPOLIA_CHAIN_ID = 11155111;
     uint256 public constant LOCAL_CHAIN_ID = 31337;
+    NetworkConfig public localNetworkConfig;
 
     function getConfig(IERC20 usdcToken) public returns (NetworkConfig memory) {
         if (block.chainid == LOCAL_CHAIN_ID) {
@@ -58,12 +59,13 @@ contract HelperConfig is Script {
     function getLocalConfig(
         IERC20 usdcToken
     ) public returns (NetworkConfig memory) {
+        if (address(localNetworkConfig.uniswapV4PoolManager) != address(0)) {
+            return localNetworkConfig;
+        }
         address admin = makeAddr("admin");
         Currency ethCurrency = Currency.wrap(address(0));
         Currency usdcCurrency = Currency.wrap(address(usdcToken));
-        vm.startBroadcast();
         PoolManager manager = new PoolManager(address(this));
-        vm.stopBroadcast();
         PoolKey memory ethUsdcPoolKey = PoolKey(
             ethCurrency,
             usdcCurrency,
@@ -71,12 +73,12 @@ contract HelperConfig is Script {
             int24((3000 / 100) * 2),
             IHooks(address(0))
         );
-        return
-            NetworkConfig({
-                uniswapV4PoolManager: manager,
-                ethUsdcPoolKey: ethUsdcPoolKey,
-                usdcToken: usdcToken,
-                admin: admin
-            });
+        localNetworkConfig = NetworkConfig({
+            uniswapV4PoolManager: manager,
+            ethUsdcPoolKey: ethUsdcPoolKey,
+            usdcToken: usdcToken,
+            admin: admin
+        });
+        return localNetworkConfig;
     }
 }

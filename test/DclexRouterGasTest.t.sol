@@ -72,8 +72,9 @@ contract DclexRouterGasTest is Test {
             dclexRouter,
             config,
             pythAddress,
-            dclexProtocolHelperConfig
-        ) = routerDeployer.run(stocksFactory);
+            dclexProtocolHelperConfig,
+
+        ) = routerDeployer.run(stocksFactory, 60);
         usdcToken = USDCMock(address(config.usdcToken));
         manager = config.uniswapV4PoolManager;
         ethUsdcPoolKey = config.ethUsdcPoolKey;

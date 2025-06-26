@@ -50,11 +50,12 @@ contract InitializePool is Script {
             } else {
                 inputs[1] = stockSymbols[i];
                 pythData[0] = vm.parseBytes(vm.toString(vm.ffi(inputs)));
+                pythData[1] = vm.parseBytes(vm.toString(vm.ffi(inputs)));
             }
             DclexPool pool = dclexRouter.stockTokenToPool(stockAddress);
             pool.stockToken().approve(address(pool), stockAmount);
             pool.usdcToken().approve(address(pool), usdcAmount);
-            pool.initialize{value: 2}(stockAmount, usdcAmount, pythData);
+            pool.initialize{value: 4}(stockAmount, usdcAmount, pythData);
         }
         vm.stopBroadcast();
     }
