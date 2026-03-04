@@ -4,7 +4,6 @@ pragma solidity ^0.8.26;
 import {Script} from "forge-std/Script.sol";
 import {IStock} from "dclex-mint/contracts/interfaces/IStock.sol";
 import {DigitalIdentity} from "dclex-mint/contracts/dclex/DigitalIdentity.sol";
-import {ITransferVerifier} from "dclex-mint/contracts/interfaces/ITransferVerifier.sol";
 import {DeployDclexPool} from "dclex-protocol/script/DeployDclexPool.s.sol";
 import {DclexPool} from "dclex-protocol/src/DclexPool.sol";
 import {HelperConfig as DclexProtocolHelperConfig} from "dclex-protocol/script/HelperConfig.s.sol";
@@ -50,6 +49,12 @@ contract DeployRouterWithPools is Script {
             maxPriceStaleness
         );
         vm.startBroadcast();
+        // Router needs a DID because it acts as intermediary for dUSD
+        // in stock-to-stock swaps (receives from pool A, sends to pool B)
+        DigitalIdentity digitalIdentity = DigitalIdentity(
+            address(stocksFactory.getDID())
+        );
+        digitalIdentity.mintAdmin(address(dclexRouter), 2, bytes32(0));
         dclexRouter.transferOwnership(config.admin);
         vm.stopBroadcast();
         return (
@@ -82,12 +87,7 @@ contract DeployRouterWithPools is Script {
             );
             vm.startBroadcast();
             dclexRouter.setPool(stockAddress, dclexPool);
-            digitalIdentity.mintAdmin(
-                address(dclexPool),
-                2,
-                "",
-                ITransferVerifier(address(0))
-            );
+            digitalIdentity.mintAdmin(address(dclexPool), 2, bytes32(0));
             vm.stopBroadcast();
         }
     }
