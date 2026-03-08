@@ -7,7 +7,6 @@ import {DclexPythMock} from "dclex-protocol/test/PythMock.sol";
 import {DclexRouter} from "src/DclexRouter.sol";
 import {DclexPool} from "dclex-protocol/src/DclexPool.sol";
 import {DeployDclex} from "dclex-protocol/script/DeployDclex.s.sol";
-import {ITransferVerifier} from "dclex-mint/contracts/interfaces/ITransferVerifier.sol";
 import {DeployRouterWithPools} from "../script/DeployDclexRouterWithPools.s.sol";
 import {InitializeUniswapV4Pool} from "../script/InitializeUniswapV4Pool.s.sol";
 import {HelperConfig} from "../script/HelperConfig.s.sol";
@@ -112,7 +111,7 @@ contract DclexRouterTest is Test, TestBalance {
         setupAccount(USER_1);
         setupAccount(USER_2);
         vm.prank(ADMIN);
-        digitalIdentity.mintAdmin(address(dclexRouter), 0, "", ITransferVerifier(address(0)));
+        digitalIdentity.mintAdmin(address(dclexRouter), 0, "");
 
         vm.startPrank(address(this));
         aaplStock.approve(address(aaplPool), 100000 ether);
@@ -129,7 +128,7 @@ contract DclexRouterTest is Test, TestBalance {
         uniswapV4PoolInitializer.run(config);
 
         vm.prank(ADMIN);
-        digitalIdentity.mintAdmin(unapprovedUSDCAddress, 0, "", ITransferVerifier(address(0)));
+        digitalIdentity.mintAdmin(unapprovedUSDCAddress, 0, "");
         vm.prank(unapprovedUSDCAddress);
         aaplStock.approve(address(dclexRouter), 100000 ether);
 
@@ -138,7 +137,7 @@ contract DclexRouterTest is Test, TestBalance {
     function setupAccount(address account) private {
         usdcToken.mint(account, 1000000e6);
         vm.prank(ADMIN);
-        digitalIdentity.mintAdmin(account, 0, "", ITransferVerifier(address(0)));
+        digitalIdentity.mintAdmin(account, 0, "");
         vm.startPrank(MASTER_ADMIN);
         stocksFactory.forceMintStocks("AAPL", account, 100000 ether);
         stocksFactory.forceMintStocks("NVDA", account, 10000 ether);

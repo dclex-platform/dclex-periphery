@@ -7,7 +7,6 @@ import {DclexRouter} from "../src/DclexRouter.sol";
 import {DclexPool} from "dclex-protocol/src/DclexPool.sol";
 import {DeployDclex} from "dclex-protocol/script/DeployDclex.s.sol";
 import {DigitalIdentity} from "dclex-mint/contracts/dclex/DigitalIdentity.sol";
-import {ITransferVerifier} from "dclex-mint/contracts/interfaces/ITransferVerifier.sol";
 import {DeployRouterWithPools} from "../script/DeployDclexRouterWithPools.s.sol";
 import {InitializeUniswapV4Pool} from "../script/InitializeUniswapV4Pool.s.sol";
 import {HelperConfig} from "../script/HelperConfig.s.sol";
@@ -113,12 +112,7 @@ contract DclexRouterGasTest is Test {
     function setupAccount(address account) private {
         usdcToken.mint(account, 1000000e6);
         vm.prank(ADMIN);
-        digitalIdentity.mintAdmin(
-            account,
-            0,
-            "",
-            ITransferVerifier(address(0))
-        );
+        digitalIdentity.mintAdmin(account, 0, "");
         vm.prank(MASTER_ADMIN);
         stocksFactory.forceMintStocks("AAPL", account, 100000 ether);
         vm.prank(MASTER_ADMIN);

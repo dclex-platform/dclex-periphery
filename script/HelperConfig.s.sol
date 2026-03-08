@@ -21,13 +21,17 @@ contract HelperConfig is Script {
 
     uint256 public constant ETH_SEPOLIA_CHAIN_ID = 11155111;
     uint256 public constant LOCAL_CHAIN_ID = 31337;
+    uint256 public constant PRIMELTA_DEV_CHAIN_ID = 2028;
     NetworkConfig public localNetworkConfig;
+    NetworkConfig public primeltaDevNetworkConfig;
 
     function getConfig(IERC20 usdcToken) public returns (NetworkConfig memory) {
         if (block.chainid == LOCAL_CHAIN_ID) {
             return getLocalConfig(usdcToken);
         } else if (block.chainid == ETH_SEPOLIA_CHAIN_ID) {
             return getSepoliaConfig(usdcToken);
+        } else if (block.chainid == PRIMELTA_DEV_CHAIN_ID) {
+            return getPrimeltaDevConfig(usdcToken);
         } else {
             revert HelperConfig__InvalidChainId();
         }
@@ -54,6 +58,32 @@ contract HelperConfig is Script {
                 usdcToken: usdcToken,
                 admin: 0x971b5a2872ec17EeDDED9fc4dd691D8B33B97031
             });
+    }
+
+    function getPrimeltaDevConfig(
+        IERC20 usdcToken
+    ) public returns (NetworkConfig memory) {
+        if (address(primeltaDevNetworkConfig.uniswapV4PoolManager) != address(0)) {
+            return primeltaDevNetworkConfig;
+        }
+        Currency ethCurrency = Currency.wrap(address(0));
+        Currency usdcCurrency = Currency.wrap(address(usdcToken));
+        PoolKey memory ethUsdcPoolKey = PoolKey(
+            ethCurrency,
+            usdcCurrency,
+            3000,
+            int24((3000 / 100) * 2),
+            IHooks(address(0))
+        );
+        // Use existing deployed PoolManager — do NOT deploy a new one
+        PoolManager manager = PoolManager(0x23d351BA89eaAc4E328133Cb48e050064C219A1E);
+        primeltaDevNetworkConfig = NetworkConfig({
+            uniswapV4PoolManager: manager,
+            ethUsdcPoolKey: ethUsdcPoolKey,
+            usdcToken: usdcToken,
+            admin: 0x70997970C51812dc3A010C7d01b50e0d17dc79C8
+        });
+        return primeltaDevNetworkConfig;
     }
 
     function getLocalConfig(
