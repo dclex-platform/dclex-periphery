@@ -60,7 +60,7 @@ contract DeployRouterWithPools is Script {
         return (
             dclexRouter,
             config,
-            address(dclexProtocolHelperConfig.getConfig().pyth),
+            address(dclexProtocolHelperConfig.getConfig().oracle),
             dclexProtocolHelperConfig,
             helperConfig
         );

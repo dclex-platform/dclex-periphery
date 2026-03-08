@@ -23,10 +23,10 @@ contract InitializePool is Script {
         DclexRouter dclexRouter = DclexRouter(payable(routerAddress));
         Factory stocksFactory = Factory(stocksFactoryAddress);
         vm.startBroadcast();
-        if (block.chainid == 31337) {}
+        if (block.chainid == 31337 || block.chainid == 2028) {}
         for (uint256 i = 0; i < stockSymbols.length; ++i) {
             address stockAddress = stocksFactory.stocks(stockSymbols[i]);
-            if (block.chainid == 31337) {
+            if (block.chainid == 31337 || block.chainid == 2028) {
                 pythData[0] = createMockPriceFeedUpdateData(
                     dclexProtocolHelperConfig.getPriceFeedId(stockSymbols[i]),
                     int64(uint64(1e18 / 1e10)),

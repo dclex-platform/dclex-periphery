@@ -269,7 +269,7 @@ contract DclexRouter is SafeCallback, Ownable, IDclexSwapCallback {
                 pythUpdateData
             );
         } else {
-            _getPool(outputToken).updatePythPriceFeeds{value: msg.value}(
+            _getPool(outputToken).updatePriceFeeds{value: msg.value}(
                 pythUpdateData
             );
             usdcAmount = _executeUniswapOperation(
@@ -328,7 +328,7 @@ contract DclexRouter is SafeCallback, Ownable, IDclexSwapCallback {
                 pythUpdateData
             );
         } else {
-            _getPool(inputToken).updatePythPriceFeeds{value: msg.value}(
+            _getPool(inputToken).updatePriceFeeds{value: msg.value}(
                 pythUpdateData
             );
             uint256 inputAmount = _executeUniswapOperation(
