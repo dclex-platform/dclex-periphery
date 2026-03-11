@@ -18,7 +18,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 ///         After initialization, call setTrustedSigner() to switch to the backend signer.
 contract DeployMissingPools is Script {
     // Chain 2028 — primelta-dev
-    address payable constant DCLEX_ROUTER = payable(0x1ffbb4cf957630830a624aca3f811fbb69d5a027);
+    address payable constant DCLEX_ROUTER = payable(0x1FFbb4cF957630830A624Aca3f811FBB69d5A027);
     address constant FACTORY     = 0x5d360D437c9bEd63B149435b11f5c5c5d41bb549;
     address constant DID         = 0x399426509BE32e1ca682582CDF157ED050ED823B;
     address constant DUSD        = 0x951c4871D16d953a3Fd64c17a756B1aA95D63E58;
@@ -87,15 +87,18 @@ contract DeployMissingPools is Script {
         DigitalIdentity digitalIdentity = DigitalIdentity(DID);
         IERC20      dusdToken           = IERC20(DUSD);
 
+        uint256 deployerKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
+        uint256 adminKey    = vm.envUint("ADMIN_PRIVATE_KEY");
+
         // Step 1: Deploy FIOracle with deployer as temporary trusted signer + admin
-        vm.startBroadcast();
-        FIOracle fiOracle = new FIOracle(msg.sender, msg.sender);
+        vm.startBroadcast(deployerKey);
+        FIOracle fiOracle = new FIOracle(vm.addr(deployerKey), vm.addr(deployerKey));
         vm.stopBroadcast();
         console.log("FIOracle deployed at:", address(fiOracle));
 
         IPriceOracle oracle = IPriceOracle(address(fiOracle));
 
-        // Step 2: Deploy pools
+        // Step 2: Deploy pools (deployer deploys, admin registers + mints DID)
         StockInfo[] memory allStocks = getAllStocks();
         for (uint256 i = 0; i < allStocks.length; i++) {
             string memory symbol    = allStocks[i].symbol;
@@ -104,7 +107,8 @@ contract DeployMissingPools is Script {
             address stockAddress = stocksFactory.stocks(symbol);
             require(stockAddress != address(0), string.concat("Stock not found: ", symbol));
 
-            vm.startBroadcast();
+            // Deploy pool with deployer
+            vm.startBroadcast(deployerKey);
             DclexPool dclexPool = new DclexPool(
                 IStock(stockAddress),
                 dusdToken,
@@ -113,6 +117,10 @@ contract DeployMissingPools is Script {
                 ADMIN,
                 MAX_PRICE_STALENESS
             );
+            vm.stopBroadcast();
+
+            // Register pool + mint DID with admin (router owner + DID admin)
+            vm.startBroadcast(adminKey);
             dclexRouter.setPool(stockAddress, address(dclexPool));
             digitalIdentity.mintAdmin(address(dclexPool), 2, bytes32(0));
             vm.stopBroadcast();
@@ -121,10 +129,10 @@ contract DeployMissingPools is Script {
         }
 
         // Step 3: Transfer FIOracle to production config
-        vm.startBroadcast();
+        vm.startBroadcast(deployerKey);
         fiOracle.setTrustedSigner(BACKEND_SIGNER);
         fiOracle.grantRole(fiOracle.DEFAULT_ADMIN_ROLE(), ADMIN);
-        fiOracle.renounceRole(fiOracle.DEFAULT_ADMIN_ROLE(), msg.sender);
+        fiOracle.renounceRole(fiOracle.DEFAULT_ADMIN_ROLE(), vm.addr(deployerKey));
         vm.stopBroadcast();
         console.log("FIOracle: signer -> backend, admin -> ADMIN, deployer role revoked");
 
