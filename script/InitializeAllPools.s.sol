@@ -6,6 +6,7 @@ import {Factory} from "dclex-mint/contracts/dclex/Factory.sol";
 import {DclexPool} from "dclex-protocol/src/DclexPool.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
+import {FIOracle} from "dclex-protocol/src/FIOracle.sol";
 
 interface IDclexRouter {
     function stockTokenToPool(address token) external view returns (address);
@@ -18,9 +19,10 @@ interface IDclexRouter {
 ///         dusdAmount:  1000 dUSD (6 decimals) = 1000e6
 ///         Pool value ~= 10 * 100 + 1000 = 2000 USD each side
 contract InitializeAllPools is Script {
-    address payable constant DCLEX_ROUTER = payable(0x1ffbb4cf957630830a624aca3f811fbb69d5a027);
+    address payable constant DCLEX_ROUTER = payable(0x1FFbb4cF957630830A624Aca3f811FBB69d5A027);
     address constant FACTORY      = 0x5d360D437c9bEd63B149435b11f5c5c5d41bb549;
     address constant DUSD         = 0x951c4871D16d953a3Fd64c17a756B1aA95D63E58;
+    address constant FI_ORACLE    = 0x3fedb4Ebc078968Cd9735ab67141986D587300a4;
 
     // Mock prices: all stocks @ $100
     // For $100: price = 10000000000 (1e10), expo = -8 → 1e10 * 1e-8 = 100
@@ -106,14 +108,22 @@ contract InitializeAllPools is Script {
         IDclexRouter router  = IDclexRouter(DCLEX_ROUTER);
         Factory factory      = Factory(FACTORY);
         IERC20 dusdToken     = IERC20(DUSD);
+        FIOracle fiOracle    = FIOracle(FI_ORACLE);
 
-        uint256 deployerKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
+        uint256 adminKey    = vm.envUint("ADMIN_PRIVATE_KEY");
+        address admin       = vm.addr(adminKey);
+
+        // Temporarily set admin as FIOracle trusted signer (admin has the role)
+        vm.startBroadcast(adminKey);
+        fiOracle.setTrustedSigner(admin);
+        vm.stopBroadcast();
+        console.log("FIOracle: temporarily set admin as trusted signer");
 
         StockInfo[] memory allStocks = getAllStocks();
 
-        // Mint dUSD for all pools in one shot via Factory (44 pools * 1000 dUSD)
-        vm.startBroadcast(deployerKey);
-        factory.forceMintStablecoin("dUSD", msg.sender, DUSD_AMOUNT * allStocks.length);
+        // Mint dUSD for all pools in one shot via Factory (admin has DEFAULT_ADMIN_ROLE)
+        vm.startBroadcast(adminKey);
+        factory.forceMintStablecoin("dUSD", admin, DUSD_AMOUNT * allStocks.length);
         vm.stopBroadcast();
 
         for (uint256 i = 0; i < allStocks.length; i++) {
@@ -129,19 +139,19 @@ contract InitializeAllPools is Script {
             DclexPool pool  = DclexPool(poolAddress);
             IERC20 stockTok = IERC20(stockAddress);
 
-            // Build FIOracle-compatible signed price data
+            // Build FIOracle-compatible signed price data (admin is temp trusted signer)
             bytes[] memory priceData = new bytes[](1);
             priceData[0] = signedPriceData(
-                deployerKey,
+                adminKey,
                 feedId,
                 MOCK_PRICE,
                 EXPO,
                 uint64(block.timestamp)
             );
 
-            vm.startBroadcast(deployerKey);
+            vm.startBroadcast(adminKey);
             // Mint stock tokens via factory
-            factory.forceMintStocks(symbol, msg.sender, STOCK_AMOUNT);
+            factory.forceMintStocks(symbol, admin, STOCK_AMOUNT);
             // Approve pool to spend stock + dUSD
             stockTok.approve(poolAddress, STOCK_AMOUNT);
             dusdToken.approve(poolAddress, DUSD_AMOUNT);
@@ -151,6 +161,12 @@ contract InitializeAllPools is Script {
 
             console.log("Initialized pool for", symbol, "at", poolAddress);
         }
+
+        // Restore backend signer
+        vm.startBroadcast(adminKey);
+        fiOracle.setTrustedSigner(0x971b5a2872ec17EeDDED9fc4dd691D8B33B97031);
+        vm.stopBroadcast();
+        console.log("FIOracle: restored backend as trusted signer");
 
         console.log("All 44 pools initialized with dUSD.");
     }
