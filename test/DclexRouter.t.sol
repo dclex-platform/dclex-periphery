@@ -20,8 +20,6 @@ import {
 } from "dclex-blockchain/contracts/dclex/DigitalIdentity.sol";
 
 import {Factory} from "dclex-blockchain/contracts/dclex/Factory.sol";
-import {IFactory} from "dclex-blockchain/contracts/interfaces/IFactory.sol";
-import {Factory} from "dclex-blockchain/contracts/dclex/Factory.sol";
 import {Stock} from "dclex-blockchain/contracts/dclex/Stock.sol";
 import {USDCMock} from "dclex-blockchain/contracts/mocks/USDCMock.sol";
 import {TestBalance} from "dclex-protocol/test/TestBalance.sol";
