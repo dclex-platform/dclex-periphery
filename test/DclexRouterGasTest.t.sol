@@ -18,8 +18,6 @@ import {
     HelperConfig as DclexProtocolHelperConfig
 } from "dclex-protocol/script/HelperConfig.s.sol";
 import {Factory} from "dclex-blockchain/contracts/dclex/Factory.sol";
-import {IFactory} from "dclex-blockchain/contracts/interfaces/IFactory.sol";
-import {Factory} from "dclex-blockchain/contracts/dclex/Factory.sol";
 import {Stock} from "dclex-blockchain/contracts/dclex/Stock.sol";
 import {USDCMock} from "dclex-blockchain/contracts/mocks/USDCMock.sol";
 import {PoolManager} from "@uniswap/v4-core/src/PoolManager.sol";
@@ -35,9 +33,6 @@ import {
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
-import {
-    PoolModifyLiquidityTest
-} from "@uniswap/v4-core/src/test/PoolModifyLiquidityTest.sol";
 
 contract DclexRouterGasTest is Test {
     bytes32 internal AAPL_PRICE_FEED_ID;
