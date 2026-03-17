@@ -6,26 +6,38 @@ import {DclexPythMock} from "dclex-protocol/test/PythMock.sol";
 import {DclexRouter} from "../src/DclexRouter.sol";
 import {DclexPool} from "dclex-protocol/src/DclexPool.sol";
 import {DeployDclex} from "dclex-protocol/script/DeployDclex.s.sol";
-import {DigitalIdentity} from "dclex-mint/contracts/dclex/DigitalIdentity.sol";
-import {DeployRouterWithPools} from "../script/DeployDclexRouterWithPools.s.sol";
+import {
+    DigitalIdentity
+} from "dclex-blockchain/contracts/dclex/DigitalIdentity.sol";
+import {
+    DeployRouterWithPools
+} from "../script/DeployDclexRouterWithPools.s.sol";
 import {InitializeUniswapV4Pool} from "../script/InitializeUniswapV4Pool.s.sol";
 import {HelperConfig} from "../script/HelperConfig.s.sol";
-import {HelperConfig as DclexProtocolHelperConfig} from "dclex-protocol/script/HelperConfig.s.sol";
-import {Factory} from "dclex-mint/contracts/dclex/Factory.sol";
-import {IFactory} from "dclex-mint/contracts/interfaces/IFactory.sol";
-import {Factory} from "dclex-mint/contracts/dclex/Factory.sol";
-import {Stock} from "dclex-mint/contracts/dclex/Stock.sol";
-import {USDCMock} from "dclex-mint/contracts/mocks/USDCMock.sol";
+import {
+    HelperConfig as DclexProtocolHelperConfig
+} from "dclex-protocol/script/HelperConfig.s.sol";
+import {Factory} from "dclex-blockchain/contracts/dclex/Factory.sol";
+import {IFactory} from "dclex-blockchain/contracts/interfaces/IFactory.sol";
+import {Factory} from "dclex-blockchain/contracts/dclex/Factory.sol";
+import {Stock} from "dclex-blockchain/contracts/dclex/Stock.sol";
+import {USDCMock} from "dclex-blockchain/contracts/mocks/USDCMock.sol";
 import {PoolManager} from "@uniswap/v4-core/src/PoolManager.sol";
-import {PoolModifyLiquidityTest} from "@uniswap/v4-core/src/test/PoolModifyLiquidityTest.sol";
+import {
+    PoolModifyLiquidityTest
+} from "@uniswap/v4-core/src/test/PoolModifyLiquidityTest.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {Deployers} from "@uniswap/v4-core/test/utils/Deployers.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
-import {LiquidityAmounts} from "@uniswap/v4-core/test/utils/LiquidityAmounts.sol";
+import {
+    LiquidityAmounts
+} from "@uniswap/v4-core/test/utils/LiquidityAmounts.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
-import {PoolModifyLiquidityTest} from "@uniswap/v4-core/src/test/PoolModifyLiquidityTest.sol";
+import {
+    PoolModifyLiquidityTest
+} from "@uniswap/v4-core/src/test/PoolModifyLiquidityTest.sol";
 
 contract DclexRouterGasTest is Test {
     bytes32 internal AAPL_PRICE_FEED_ID;
@@ -112,7 +124,7 @@ contract DclexRouterGasTest is Test {
     function setupAccount(address account) private {
         usdcToken.mint(account, 1000000e6);
         vm.prank(ADMIN);
-        digitalIdentity.mintAdmin(account, 0, "");
+        digitalIdentity.mintAdmin(account, 0, bytes32(0));
         vm.prank(MASTER_ADMIN);
         stocksFactory.forceMintStocks("AAPL", account, 100000 ether);
         vm.prank(MASTER_ADMIN);

@@ -5,11 +5,15 @@ import {Script, console} from "forge-std/Script.sol";
 import {HelperConfig} from "./HelperConfig.s.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
-import {PoolModifyLiquidityTest} from "@uniswap/v4-core/src/test/PoolModifyLiquidityTest.sol";
-import {LiquidityAmounts} from "@uniswap/v4-core/test/utils/LiquidityAmounts.sol";
+import {
+    PoolModifyLiquidityTest
+} from "@uniswap/v4-core/src/test/PoolModifyLiquidityTest.sol";
+import {
+    LiquidityAmounts
+} from "@uniswap/v4-core/test/utils/LiquidityAmounts.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {USDCMock} from "dclex-mint/contracts/mocks/USDCMock.sol";
+import {USDCMock} from "dclex-blockchain/contracts/mocks/USDCMock.sol";
 
 contract InitializeUniswapV4Pool is Script {
     uint256 private ETH_USDC_PRICE = 3000;
