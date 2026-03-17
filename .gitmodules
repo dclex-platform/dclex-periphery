@@ -4,9 +4,11 @@
 [submodule "lib/dclex-blockchain"]
 	path = lib/dclex-blockchain
 	url = https://github.com/dclex-platform/dclex-blockchain
+	branch = main
 [submodule "lib/dclex-protocol"]
 	path = lib/dclex-protocol
 	url = https://github.com/dclex-platform/dclex-protocol
+	branch = main
 [submodule "lib/pyth-sdk-solidity"]
 	path = lib/pyth-sdk-solidity
 	url = https://github.com/pyth-network/pyth-sdk-solidity
@@ -19,6 +21,3 @@
 [submodule "lib/openzeppelin-contracts"]
 	path = lib/openzeppelin-contracts
 	url = https://github.com/OpenZeppelin/openzeppelin-contracts
-[submodule "lib/dclex-mint"]
-	path = lib/dclex-mint
-	url = https://github.com/dclex-platform/dclex-mint
