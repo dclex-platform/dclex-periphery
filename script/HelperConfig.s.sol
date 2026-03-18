@@ -6,7 +6,7 @@ import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {PoolManager} from "@uniswap/v4-core/src/PoolManager.sol";
-import {USDCMock} from "dclex-mint/contracts/mocks/USDCMock.sol";
+import {USDCMock} from "dclex-blockchain/contracts/mocks/USDCMock.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 contract HelperConfig is Script {
@@ -63,7 +63,9 @@ contract HelperConfig is Script {
     function getPrimeltaDevConfig(
         IERC20 usdcToken
     ) public returns (NetworkConfig memory) {
-        if (address(primeltaDevNetworkConfig.uniswapV4PoolManager) != address(0)) {
+        if (
+            address(primeltaDevNetworkConfig.uniswapV4PoolManager) != address(0)
+        ) {
             return primeltaDevNetworkConfig;
         }
         Currency ethCurrency = Currency.wrap(address(0));
@@ -76,7 +78,9 @@ contract HelperConfig is Script {
             IHooks(address(0))
         );
         // Use existing deployed PoolManager — do NOT deploy a new one
-        PoolManager manager = PoolManager(0x23d351BA89eaAc4E328133Cb48e050064C219A1E);
+        PoolManager manager = PoolManager(
+            0x23d351BA89eaAc4E328133Cb48e050064C219A1E
+        );
         primeltaDevNetworkConfig = NetworkConfig({
             uniswapV4PoolManager: manager,
             ethUsdcPoolKey: ethUsdcPoolKey,

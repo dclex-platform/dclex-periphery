@@ -7,28 +7,36 @@ import {DclexPythMock} from "dclex-protocol/test/PythMock.sol";
 import {DclexRouter} from "src/DclexRouter.sol";
 import {DclexPool} from "dclex-protocol/src/DclexPool.sol";
 import {DeployDclex} from "dclex-protocol/script/DeployDclex.s.sol";
-import {DeployRouterWithPools} from "../script/DeployDclexRouterWithPools.s.sol";
+import {
+    DeployRouterWithPools
+} from "../script/DeployDclexRouterWithPools.s.sol";
 import {InitializeUniswapV4Pool} from "../script/InitializeUniswapV4Pool.s.sol";
 import {HelperConfig} from "../script/HelperConfig.s.sol";
-import {HelperConfig as DclexProtocolHelperConfig} from "dclex-protocol/script/HelperConfig.s.sol";
-import {DigitalIdentity} from "dclex-mint/contracts/dclex/DigitalIdentity.sol";
-import {Factory} from "dclex-mint/contracts/dclex/Factory.sol";
-import {IFactory} from "dclex-mint/contracts/interfaces/IFactory.sol";
-import {Factory} from "dclex-mint/contracts/dclex/Factory.sol";
-import {Stock} from "dclex-mint/contracts/dclex/Stock.sol";
-import {USDCMock} from "dclex-mint/contracts/mocks/USDCMock.sol";
+import {
+    HelperConfig as DclexProtocolHelperConfig
+} from "dclex-protocol/script/HelperConfig.s.sol";
+import {
+    DigitalIdentity
+} from "dclex-blockchain/contracts/dclex/DigitalIdentity.sol";
+
+import {Factory} from "dclex-blockchain/contracts/dclex/Factory.sol";
+import {Stock} from "dclex-blockchain/contracts/dclex/Stock.sol";
+import {USDCMock} from "dclex-blockchain/contracts/mocks/USDCMock.sol";
 import {TestBalance} from "dclex-protocol/test/TestBalance.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {PoolManager} from "@uniswap/v4-core/src/PoolManager.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {Deployers} from "@uniswap/v4-core/test/utils/Deployers.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
-import {LiquidityAmounts} from "@uniswap/v4-core/test/utils/LiquidityAmounts.sol";
+import {
+    LiquidityAmounts
+} from "@uniswap/v4-core/test/utils/LiquidityAmounts.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
-import {PoolModifyLiquidityTest} from "@uniswap/v4-core/src/test/PoolModifyLiquidityTest.sol";
-
+import {
+    PoolModifyLiquidityTest
+} from "@uniswap/v4-core/src/test/PoolModifyLiquidityTest.sol";
 
 contract DclexRouterTest is Test, TestBalance {
     bytes[] internal PYTH_DATA = new bytes[](0);
@@ -41,7 +49,8 @@ contract DclexRouterTest is Test, TestBalance {
     address private immutable POOL_ADMIN = makeAddr("pool_admin");
     address private immutable USER_1 = makeAddr("user_1");
     address private immutable USER_2 = makeAddr("user_2");
-    address private immutable unapprovedUSDCAddress = makeAddr("unapproved_usdc");
+    address private immutable unapprovedUSDCAddress =
+        makeAddr("unapproved_usdc");
     PoolKey private ethUsdcPoolKey;
     PoolManager private manager;
     DigitalIdentity internal digitalIdentity;
@@ -89,7 +98,13 @@ contract DclexRouterTest is Test, TestBalance {
         DeployRouterWithPools routerDeployer = new DeployRouterWithPools();
         address pythAddress;
         DclexProtocolHelperConfig dclexProtocolHelperConfig;
-        (dclexRouter, config, pythAddress, dclexProtocolHelperConfig,) = routerDeployer.run(stocksFactory, 60);
+        (
+            dclexRouter,
+            config,
+            pythAddress,
+            dclexProtocolHelperConfig,
+
+        ) = routerDeployer.run(stocksFactory, 60);
         usdcToken = USDCMock(address(config.usdcToken));
         manager = config.uniswapV4PoolManager;
         ethUsdcPoolKey = config.ethUsdcPoolKey;
@@ -111,7 +126,7 @@ contract DclexRouterTest is Test, TestBalance {
         setupAccount(USER_1);
         setupAccount(USER_2);
         vm.prank(ADMIN);
-        digitalIdentity.mintAdmin(address(dclexRouter), 0, "");
+        digitalIdentity.mintAdmin(address(dclexRouter), 0, bytes32(0));
 
         vm.startPrank(address(this));
         aaplStock.approve(address(aaplPool), 100000 ether);
@@ -128,16 +143,15 @@ contract DclexRouterTest is Test, TestBalance {
         uniswapV4PoolInitializer.run(config);
 
         vm.prank(ADMIN);
-        digitalIdentity.mintAdmin(unapprovedUSDCAddress, 0, "");
+        digitalIdentity.mintAdmin(unapprovedUSDCAddress, 0, bytes32(0));
         vm.prank(unapprovedUSDCAddress);
         aaplStock.approve(address(dclexRouter), 100000 ether);
-
     }
 
     function setupAccount(address account) private {
         usdcToken.mint(account, 1000000e6);
         vm.prank(ADMIN);
-        digitalIdentity.mintAdmin(account, 0, "");
+        digitalIdentity.mintAdmin(account, 0, bytes32(0));
         vm.startPrank(MASTER_ADMIN);
         stocksFactory.forceMintStocks("AAPL", account, 100000 ether);
         stocksFactory.forceMintStocks("NVDA", account, 10000 ether);
@@ -1743,7 +1757,9 @@ contract DclexRouterTest is Test, TestBalance {
         dclexRouter.dclexSwapCallback(address(aaplStock), 1 ether, data);
     }
 
-    function testAllStockTokensReturnsAllCurrentlyRegisteredStockTokens() external {
+    function testAllStockTokensReturnsAllCurrentlyRegisteredStockTokens()
+        external
+    {
         address[] memory result = dclexRouter.allStockTokens();
         assertEq(result.length, 2);
         assertEq(result[0], address(aaplStock));
@@ -2049,7 +2065,9 @@ contract DclexRouterTest is Test, TestBalance {
         );
     }
 
-    function testStockToStockExactInputSwapDoesNotRequireApprovingUSDC() external {
+    function testStockToStockExactInputSwapDoesNotRequireApprovingUSDC()
+        external
+    {
         vm.prank(MASTER_ADMIN);
         stocksFactory.forceMintStocks("AAPL", unapprovedUSDCAddress, 1 ether);
 
@@ -2064,7 +2082,9 @@ contract DclexRouterTest is Test, TestBalance {
         );
     }
 
-    function testEthToStockExactInputSwapDoesNotRequireApprovingUSDC() external {
+    function testEthToStockExactInputSwapDoesNotRequireApprovingUSDC()
+        external
+    {
         vm.deal(unapprovedUSDCAddress, 1 ether);
 
         vm.prank(unapprovedUSDCAddress);
@@ -2078,7 +2098,9 @@ contract DclexRouterTest is Test, TestBalance {
         );
     }
 
-    function testStockToEthExactInputSwapDoesNotRequireApprovingUSDC() external {
+    function testStockToEthExactInputSwapDoesNotRequireApprovingUSDC()
+        external
+    {
         vm.prank(MASTER_ADMIN);
         stocksFactory.forceMintStocks("AAPL", unapprovedUSDCAddress, 1 ether);
 
@@ -2093,7 +2115,9 @@ contract DclexRouterTest is Test, TestBalance {
         );
     }
 
-    function testStockToStockExactOutputSwapDoesNotRequireApprovingUSDC() external {
+    function testStockToStockExactOutputSwapDoesNotRequireApprovingUSDC()
+        external
+    {
         vm.prank(MASTER_ADMIN);
         stocksFactory.forceMintStocks("AAPL", unapprovedUSDCAddress, 1.5 ether);
 
@@ -2108,7 +2132,9 @@ contract DclexRouterTest is Test, TestBalance {
         );
     }
 
-    function testEthToStockExactOutputSwapDoesNotRequireApprovingUSDC() external {
+    function testEthToStockExactOutputSwapDoesNotRequireApprovingUSDC()
+        external
+    {
         vm.deal(unapprovedUSDCAddress, 1 ether);
 
         vm.prank(unapprovedUSDCAddress);
@@ -2122,7 +2148,9 @@ contract DclexRouterTest is Test, TestBalance {
         );
     }
 
-    function testStockToEthExactOutputSwapDoesNotRequireApprovingUSDC() external {
+    function testStockToEthExactOutputSwapDoesNotRequireApprovingUSDC()
+        external
+    {
         vm.prank(MASTER_ADMIN);
         stocksFactory.forceMintStocks("AAPL", unapprovedUSDCAddress, 10 ether);
 

@@ -4,8 +4,10 @@ pragma solidity ^0.8.26;
 import {Script, console} from "forge-std/Script.sol";
 import {DclexRouter} from "src/DclexRouter.sol";
 import {DclexPool} from "dclex-protocol/src/DclexPool.sol";
-import {DigitalIdentity} from "dclex-mint/contracts/dclex/DigitalIdentity.sol";
-import {Factory} from "dclex-mint/contracts/dclex/Factory.sol";
+import {
+    DigitalIdentity
+} from "dclex-blockchain/contracts/dclex/DigitalIdentity.sol";
+import {Factory} from "dclex-blockchain/contracts/dclex/Factory.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
@@ -19,25 +21,26 @@ interface IRouter {
 ///         sourced from the backend DB (no duplicates).
 ///         Must be run with FOUNDRY_PROFILE=router-deploy.
 contract RedeployRouter is Script {
-    address constant CURRENT_ROUTER = 0xfF545934344DbD71DdD177428E5FE9342D57A879;
-    address constant POOL_MANAGER   = 0x23d351BA89eaAc4E328133Cb48e050064C219A1E;
-    address constant DUSD           = 0x951c4871D16d953a3Fd64c17a756B1aA95D63E58;
-    address constant FACTORY        = 0x5d360D437c9bEd63B149435b11f5c5c5d41bb549;
-    address constant ADMIN          = 0x70997970C51812dc3A010C7d01b50e0d17dc79C8;
+    address constant CURRENT_ROUTER =
+        0xfF545934344DbD71DdD177428E5FE9342D57A879;
+    address constant POOL_MANAGER = 0x23d351BA89eaAc4E328133Cb48e050064C219A1E;
+    address constant DUSD = 0x951c4871D16d953a3Fd64c17a756B1aA95D63E58;
+    address constant FACTORY = 0x5d360D437c9bEd63B149435b11f5c5c5d41bb549;
+    address constant ADMIN = 0x70997970C51812dc3A010C7d01b50e0d17dc79C8;
 
     // 44 canonical stock token addresses from backend DB (ordered by symbol)
     function getCanonicalTokens() internal pure returns (address[] memory) {
         address[] memory tokens = new address[](44);
-        tokens[0]  = 0x791Dc101D61d8f773252489FdCFa960F5bD1e722; // AAPL
-        tokens[1]  = 0x7F2D966938e4d55b70A6A6476F47af01CE0E5879; // AI
-        tokens[2]  = 0xf5Ef8b639772FBeb0f4aBa4Ed1BFc1Ce8d1Fa4E4; // AMC
-        tokens[3]  = 0xC0d27Eac3f73b5c0fD3d237669372C08569a219A; // AMGN
-        tokens[4]  = 0xEB9ffe41e53942584C72A1831B27BDea8D7B5b20; // AMZN
-        tokens[5]  = 0x77aec2f1aa4eeD376ecc947eb77767eF37758760; // AXP
-        tokens[6]  = 0xc07b05f26C4289359e0f3f2343823673F73A0614; // BA
-        tokens[7]  = 0x96E211529956222d69dFb54b62A3CA7BF8642B04; // BLK
-        tokens[8]  = 0x19c671Cd8e013f6c25F89852Ba266f798A6e1610; // CAT
-        tokens[9]  = 0xBbb3928950d142Bf13e7fe5Ad5d8fC8B3831ad67; // COIN
+        tokens[0] = 0x791Dc101D61d8f773252489FdCFa960F5bD1e722; // AAPL
+        tokens[1] = 0x7F2D966938e4d55b70A6A6476F47af01CE0E5879; // AI
+        tokens[2] = 0xf5Ef8b639772FBeb0f4aBa4Ed1BFc1Ce8d1Fa4E4; // AMC
+        tokens[3] = 0xC0d27Eac3f73b5c0fD3d237669372C08569a219A; // AMGN
+        tokens[4] = 0xEB9ffe41e53942584C72A1831B27BDea8D7B5b20; // AMZN
+        tokens[5] = 0x77aec2f1aa4eeD376ecc947eb77767eF37758760; // AXP
+        tokens[6] = 0xc07b05f26C4289359e0f3f2343823673F73A0614; // BA
+        tokens[7] = 0x96E211529956222d69dFb54b62A3CA7BF8642B04; // BLK
+        tokens[8] = 0x19c671Cd8e013f6c25F89852Ba266f798A6e1610; // CAT
+        tokens[9] = 0xBbb3928950d142Bf13e7fe5Ad5d8fC8B3831ad67; // COIN
         tokens[10] = 0xFD0FA98130Be5D0591b1E47b19d61276231F04e4; // CPNG
         tokens[11] = 0xeA93a7d0302b8EE14bcAe9D25B4d320f95039141; // CRM
         tokens[12] = 0x6F2C10bcf06d91b52E11D496D74F708d29743BE4; // CSCO
