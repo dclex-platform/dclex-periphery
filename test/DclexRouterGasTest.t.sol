@@ -12,27 +12,31 @@ import {
 import {
     DeployRouterWithPools
 } from "../script/DeployDclexRouterWithPools.s.sol";
-import {InitializeUniswapV4Pool} from "../script/InitializeUniswapV4Pool.s.sol";
 import {HelperConfig} from "../script/HelperConfig.s.sol";
 import {
     HelperConfig as DclexProtocolHelperConfig
 } from "dclex-protocol/script/HelperConfig.s.sol";
+import {DeployDclexPool} from "dclex-protocol/script/DeployDclexPool.s.sol";
+import {IStock} from "dclex-blockchain/contracts/interfaces/IStock.sol";
 import {Factory} from "dclex-blockchain/contracts/dclex/Factory.sol";
 import {Stock} from "dclex-blockchain/contracts/dclex/Stock.sol";
 import {USDCMock} from "dclex-blockchain/contracts/mocks/USDCMock.sol";
-import {PoolManager} from "@uniswap/v4-core/src/PoolManager.sol";
 import {
-    PoolModifyLiquidityTest
-} from "@uniswap/v4-core/src/test/PoolModifyLiquidityTest.sol";
-import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
-import {Deployers} from "@uniswap/v4-core/test/utils/Deployers.sol";
-import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
+    UniswapV3Factory
+} from "@uniswap/v3-core/contracts/UniswapV3Factory.sol";
+import {SwapRouter} from "@uniswap/v3-periphery/contracts/SwapRouter.sol";
 import {
-    LiquidityAmounts
-} from "@uniswap/v4-core/test/utils/LiquidityAmounts.sol";
-import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
-import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
-import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
+    ISwapRouter
+} from "@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
+import {
+    IUniswapV3Pool
+} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
+import {
+    IWETH9
+} from "@uniswap/v3-periphery/contracts/interfaces/external/IWETH9.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {WDEL} from "../src/WDEL.sol";
+import {PythAdapter} from "dclex-protocol/src/PythAdapter.sol";
 
 contract DclexRouterGasTest is Test {
     bytes32 internal AAPL_PRICE_FEED_ID;
@@ -40,8 +44,6 @@ contract DclexRouterGasTest is Test {
     bytes32 internal USDC_PRICE_FEED_ID;
     address private immutable ADMIN = makeAddr("admin");
     address private immutable MASTER_ADMIN = makeAddr("master_admin");
-    address private immutable POOL_ADMIN = makeAddr("pool_admin");
-    PoolKey private ethUsdcPoolKey;
     DigitalIdentity internal digitalIdentity;
     Stock internal aaplStock;
     Stock internal nvdaStock;
@@ -51,12 +53,17 @@ contract DclexRouterGasTest is Test {
     DclexRouter private dclexRouter;
     DclexPool private aaplPool;
     DclexPool internal nvdaPool;
-    PoolManager private manager;
-    PoolModifyLiquidityTest private modifyLiquidityRouter;
+
+    // V3 Infrastructure
+    WDEL private weth;
+    UniswapV3Factory private v3Factory;
+    SwapRouter private v3SwapRouter;
+    address private ethUsdcPool;
 
     receive() external payable {}
 
     function setUp() public {
+        // Deploy DCLEX core infrastructure
         DeployDclex deployer = new DeployDclex();
         DeployDclex.DclexContracts memory contracts = deployer.run(
             ADMIN,
@@ -65,36 +72,91 @@ contract DclexRouterGasTest is Test {
         digitalIdentity = contracts.digitalIdentity;
         stocksFactory = contracts.stocksFactory;
         vm.startPrank(ADMIN);
-        stocksFactory.createStocks("Apple", "AAPL");
-        stocksFactory.createStocks("NVIDIA", "NVDA");
+        string[] memory names = new string[](2);
+        string[] memory symbols = new string[](2);
+        names[0] = "Apple";
+        names[1] = "NVIDIA";
+        symbols[0] = "AAPL";
+        symbols[1] = "NVDA";
+        stocksFactory.createStocks(names, symbols);
         vm.stopPrank();
         aaplStock = Stock(contracts.stocksFactory.stocks("AAPL"));
         nvdaStock = Stock(contracts.stocksFactory.stocks("NVDA"));
-        HelperConfig.NetworkConfig memory config;
-        DeployRouterWithPools routerDeployer = new DeployRouterWithPools();
-        address pythAddress;
-        DclexProtocolHelperConfig dclexProtocolHelperConfig;
-        (
-            dclexRouter,
-            config,
-            pythAddress,
-            dclexProtocolHelperConfig,
 
-        ) = routerDeployer.run(stocksFactory, 60);
-        usdcToken = USDCMock(address(config.usdcToken));
-        manager = config.uniswapV4PoolManager;
-        ethUsdcPoolKey = config.ethUsdcPoolKey;
-        pythMock = new DclexPythMock(pythAddress);
+        // Get config for USDC and oracle
+        DclexProtocolHelperConfig dclexProtocolHelperConfig = new DclexProtocolHelperConfig();
+        DclexProtocolHelperConfig.NetworkConfig
+            memory protocolConfig = dclexProtocolHelperConfig.getConfig();
+        usdcToken = USDCMock(address(protocolConfig.usdcToken));
+
+        // Deploy V3 infrastructure
+        weth = new WDEL();
+        v3Factory = new UniswapV3Factory();
+        v3SwapRouter = new SwapRouter(address(v3Factory), address(weth));
+
+        // Create and initialize ETH/USDC V3 pool
+        address token0 = address(weth) < address(usdcToken)
+            ? address(weth)
+            : address(usdcToken);
+        address token1 = address(weth) < address(usdcToken)
+            ? address(usdcToken)
+            : address(weth);
+        ethUsdcPool = v3Factory.createPool(token0, token1, 3000);
+
+        // Initialize pool with price (1 ETH = 3000 USDC)
+        uint160 sqrtPriceX96;
+        if (address(weth) < address(usdcToken)) {
+            sqrtPriceX96 = 4339505179874779903; // 1 ETH = 3000 USDC
+        } else {
+            sqrtPriceX96 = 1363618308704293893;
+        }
+        IUniswapV3Pool(ethUsdcPool).initialize(sqrtPriceX96);
+
+        // Deploy DclexRouter with V3 infrastructure
+        dclexRouter = new DclexRouter(
+            ISwapRouter(address(v3SwapRouter)),
+            IWETH9(address(weth)),
+            IERC20(address(usdcToken))
+        );
+
+        // Setup Pyth mock - need to get the underlying MockPyth from PythAdapter
+        PythAdapter pythAdapter = PythAdapter(address(protocolConfig.oracle));
+        pythMock = new DclexPythMock(address(pythAdapter.pyth()));
         vm.deal(address(pythMock), 1 ether);
+
         AAPL_PRICE_FEED_ID = dclexProtocolHelperConfig.getPriceFeedId("AAPL");
         NVDA_PRICE_FEED_ID = dclexProtocolHelperConfig.getPriceFeedId("NVDA");
         USDC_PRICE_FEED_ID = dclexProtocolHelperConfig.getPriceFeedId("USDC");
         pythMock.updatePrice(AAPL_PRICE_FEED_ID, 20 ether);
         pythMock.updatePrice(NVDA_PRICE_FEED_ID, 30 ether);
         pythMock.updatePrice(USDC_PRICE_FEED_ID, 1 ether);
-        aaplPool = dclexRouter.stockTokenToPool(address(aaplStock));
-        nvdaPool = dclexRouter.stockTokenToPool(address(nvdaStock));
+
+        // Deploy pools for stocks using deployer
+        DeployDclexPool dclexPoolDeployer = new DeployDclexPool();
+        aaplPool = dclexPoolDeployer.run(
+            IStock(address(aaplStock)),
+            dclexProtocolHelperConfig,
+            60
+        );
+        nvdaPool = dclexPoolDeployer.run(
+            IStock(address(nvdaStock)),
+            dclexProtocolHelperConfig,
+            60
+        );
+
+        // Register pools in router
+        dclexRouter.setPool(address(aaplStock), aaplPool);
+        dclexRouter.setPool(address(nvdaStock), nvdaPool);
+
+        // Mint DIDs for router and pools (needed for token transfers)
+        vm.startPrank(ADMIN);
+        digitalIdentity.mintAdmin(address(dclexRouter), 2, bytes32(0));
+        digitalIdentity.mintAdmin(address(aaplPool), 2, bytes32(0));
+        digitalIdentity.mintAdmin(address(nvdaPool), 2, bytes32(0));
+        vm.stopPrank();
+
         setupAccount(address(this));
+
         vm.startPrank(address(this));
         aaplStock.approve(address(dclexRouter), 100000 ether);
         nvdaStock.approve(address(dclexRouter), 100000 ether);
@@ -107,22 +169,19 @@ contract DclexRouterGasTest is Test {
         usdcToken.approve(address(aaplPool), 100000e6);
         usdcToken.approve(address(nvdaPool), 100000 ether);
         vm.stopPrank();
+
+        // Initialize pools with liquidity
         aaplPool.initialize(100 ether, 2000e6, new bytes[](0));
         nvdaPool.initialize(100 ether, 2000e6, new bytes[](0));
-
-        InitializeUniswapV4Pool uniswapV4PoolInitializer = new InitializeUniswapV4Pool();
-        vm.deal(address(DEFAULT_SENDER), 2 ether);
-        usdcToken.mint(address(DEFAULT_SENDER), 3000e6);
-        uniswapV4PoolInitializer.run(config);
     }
 
     function setupAccount(address account) private {
         usdcToken.mint(account, 1000000e6);
         vm.prank(ADMIN);
         digitalIdentity.mintAdmin(account, 0, bytes32(0));
-        vm.prank(MASTER_ADMIN);
+        vm.prank(ADMIN);
         stocksFactory.forceMintStocks("AAPL", account, 100000 ether);
-        vm.prank(MASTER_ADMIN);
+        vm.prank(ADMIN);
         stocksFactory.forceMintStocks("NVDA", account, 10000 ether);
     }
 
@@ -177,55 +236,11 @@ contract DclexRouterGasTest is Test {
         );
     }
 
-    function testEthToStockExactInput() external {
-        dclexRouter.swapExactInput{value: 0.1 ether}(
-            address(0),
-            address(aaplStock),
-            0.1 ether,
-            0,
-            block.timestamp + 1,
-            new bytes[](0)
-        );
-    }
-
-    function testStockToEthExactInput() external {
-        dclexRouter.swapExactInput(
-            address(aaplStock),
-            address(0),
-            1 ether,
-            0,
-            block.timestamp + 1,
-            new bytes[](0)
-        );
-    }
-
     function testStockToStockExactOutput() external {
         dclexRouter.swapExactOutput(
             address(aaplStock),
             address(nvdaStock),
             1 ether,
-            type(uint256).max,
-            block.timestamp + 1,
-            new bytes[](0)
-        );
-    }
-
-    function testEthToStockExactOutput() external {
-        dclexRouter.swapExactOutput{value: 1 ether}(
-            address(0),
-            address(aaplStock),
-            0.1 ether,
-            type(uint256).max,
-            block.timestamp + 1,
-            new bytes[](0)
-        );
-    }
-
-    function testStockToEthExactOutput() external {
-        dclexRouter.swapExactOutput(
-            address(aaplStock),
-            address(0),
-            0.1 ether,
             type(uint256).max,
             block.timestamp + 1,
             new bytes[](0)

@@ -1,0 +1,31 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.26;
+
+import {
+    IWETH9
+} from "@uniswap/v3-periphery/contracts/interfaces/external/IWETH9.sol";
+import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+
+contract WDEL is ERC20, IWETH9 {
+    constructor() ERC20("Wrapped DEL", "WDEL") {}
+
+    receive() external payable {
+        deposit();
+    }
+
+    function deposit() public payable override {
+        _mint(msg.sender, msg.value);
+    }
+
+    function mint(address to, uint256 amount) public {
+        require(block.chainid == 31337, "WDEL: mint only on local");
+        _mint(to, amount);
+    }
+
+    function withdraw(uint256 amount) public override {
+        require(balanceOf(msg.sender) >= amount, "WDEL: insufficient balance");
+        _burn(msg.sender, amount);
+        (bool success, ) = msg.sender.call{value: amount}("");
+        require(success, "WDEL: DEL transfer failed");
+    }
+}
