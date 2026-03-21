@@ -8,10 +8,9 @@ import {
     DigitalIdentity
 } from "dclex-blockchain/contracts/dclex/DigitalIdentity.sol";
 import {Factory} from "dclex-blockchain/contracts/dclex/Factory.sol";
-import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
-import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
-import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
-import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
+import {ISwapRouter} from "@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
+import {IWETH9} from "@uniswap/v3-periphery/contracts/interfaces/external/IWETH9.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 interface IRouter {
     function stockTokenToPool(address token) external view returns (address);
@@ -23,7 +22,8 @@ interface IRouter {
 contract RedeployRouter is Script {
     address constant CURRENT_ROUTER =
         0xfF545934344DbD71DdD177428E5FE9342D57A879;
-    address constant POOL_MANAGER = 0x23d351BA89eaAc4E328133Cb48e050064C219A1E;
+    address constant V3_SWAP_ROUTER = 0x0000000000000000000000000000000000000000; // TODO: Set after V3 deployment
+    address constant WETH = 0x0000000000000000000000000000000000000000; // TODO: Set after WETH deployment
     address constant DUSD = 0x951c4871D16d953a3Fd64c17a756B1aA95D63E58;
     address constant FACTORY = 0x5d360D437c9bEd63B149435b11f5c5c5d41bb549;
     address constant ADMIN = 0x70997970C51812dc3A010C7d01b50e0d17dc79C8;
@@ -79,22 +79,19 @@ contract RedeployRouter is Script {
     }
 
     function run() external {
-        PoolKey memory ethUsdcPoolKey = PoolKey({
-            currency0: Currency.wrap(address(0)),
-            currency1: Currency.wrap(DUSD),
-            fee: 3000,
-            tickSpacing: int24((3000 / 100) * 2),
-            hooks: IHooks(address(0))
-        });
+        run(ISwapRouter(V3_SWAP_ROUTER), IWETH9(WETH));
+    }
 
+    function run(ISwapRouter v3SwapRouter, IWETH9 weth) public {
         IRouter currentRouter = IRouter(CURRENT_ROUTER);
         address[] memory tokens = getCanonicalTokens();
 
         vm.startBroadcast();
 
         DclexRouter newRouter = new DclexRouter(
-            IPoolManager(POOL_MANAGER),
-            ethUsdcPoolKey
+            v3SwapRouter,
+            weth,
+            IERC20(DUSD)
         );
         console.log("New DclexRouter deployed at:", address(newRouter));
 
