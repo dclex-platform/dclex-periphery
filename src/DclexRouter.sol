@@ -25,6 +25,8 @@ contract DclexRouter is Ownable, IDclexSwapCallback {
     error DclexRouter__UnknownToken();
     error DclexRouter__NotDclexPool();
     error DclexRouter__InvalidPoolType();
+    error DclexRouter__MsgValueMismatch();
+    error DclexRouter__PythUpdatesNotAllowedForEthInput();
 
     enum PoolType {
         NONE,
@@ -43,12 +45,14 @@ contract DclexRouter is Ownable, IDclexSwapCallback {
     ISwapRouter public immutable v3SwapRouter;
     IWETH9 public immutable weth;
     IERC20 public immutable usdc;
-    uint24 public constant V3_FEE_TIER = 3000; // 0.3%
+    uint24 public constant DEFAULT_FEE_TIER = 3000; // 0.3%
+    uint24 public constant WETH_USDC_FEE_TIER = 3000; // 0.3% for WETH/USDC pool
 
     // Pool type registry (embedded in router)
     mapping(address => PoolType) public stockPoolType;
     mapping(address => DclexPool) public stockToCustomPool; // for CUSTOM type
     mapping(address => address) public stockToAMMPool; // for AMM type (V3 pool address)
+    mapping(address => uint24) public stockToFeeTier; // for AMM type (V3 fee tier)
 
     // Legacy compatibility - maintains list of custom pool tokens
     address[] private stockTokens;
@@ -93,6 +97,14 @@ contract DclexRouter is Ownable, IDclexSwapCallback {
         return token == address(0) ? address(weth) : token;
     }
 
+    /// @notice Get the fee tier for a token's AMM pool
+    /// @param token The token address
+    /// @return The fee tier (defaults to DEFAULT_FEE_TIER if not set)
+    function _getFeeTier(address token) internal view returns (uint24) {
+        uint24 feeTier = stockToFeeTier[token];
+        return feeTier > 0 ? feeTier : DEFAULT_FEE_TIER;
+    }
+
     // ============ Pool Registry Functions ============
 
     function setCustomPool(address token, DclexPool pool) external onlyOwner {
@@ -103,31 +115,41 @@ contract DclexRouter is Ownable, IDclexSwapCallback {
             stockPoolType[token] = PoolType.NONE;
             delete stockToCustomPool[token];
             _removeFromStockTokens(token);
+            emit CustomPoolSet(token, address(0));
+            emit PoolSetForToken(token, address(0), PoolType.NONE);
         } else {
             // Add/update pool
             pools[address(pool)] = true;
             stockPoolType[token] = PoolType.CUSTOM;
             stockToCustomPool[token] = pool;
             _addToStockTokens(token);
+            emit CustomPoolSet(token, address(pool));
+            emit PoolSetForToken(token, address(pool), PoolType.CUSTOM);
         }
-        emit CustomPoolSet(token, address(pool));
-        emit PoolSetForToken(token, address(pool), PoolType.CUSTOM);
     }
 
-    function setAMMPool(address token, address v3Pool) external onlyOwner {
+    function setAMMPool(
+        address token,
+        address v3Pool,
+        uint24 feeTier
+    ) external onlyOwner {
         if (v3Pool == address(0)) {
             // Remove pool
             stockPoolType[token] = PoolType.NONE;
             delete stockToAMMPool[token];
+            delete stockToFeeTier[token];
             _removeFromStockTokens(token);
+            emit AMMPoolSet(token, address(0));
+            emit PoolSetForToken(token, address(0), PoolType.NONE);
         } else {
             // Add/update pool
             stockPoolType[token] = PoolType.AMM;
             stockToAMMPool[token] = v3Pool;
+            stockToFeeTier[token] = feeTier;
             _addToStockTokens(token);
+            emit AMMPoolSet(token, v3Pool);
+            emit PoolSetForToken(token, v3Pool, PoolType.AMM);
         }
-        emit AMMPoolSet(token, v3Pool);
-        emit PoolSetForToken(token, v3Pool, PoolType.AMM);
     }
 
     // Legacy setPool function for backwards compatibility (Custom pools only)
@@ -138,13 +160,14 @@ contract DclexRouter is Ownable, IDclexSwapCallback {
             stockPoolType[token] = PoolType.NONE;
             delete stockToCustomPool[token];
             _removeFromStockTokens(token);
+            emit PoolSetForToken(token, address(0), PoolType.NONE);
         } else {
             pools[address(dclexPool)] = true;
             stockPoolType[token] = PoolType.CUSTOM;
             stockToCustomPool[token] = dclexPool;
             _addToStockTokens(token);
+            emit PoolSetForToken(token, address(dclexPool), PoolType.CUSTOM);
         }
-        emit PoolSetForToken(token, address(dclexPool), PoolType.CUSTOM);
     }
 
     // Legacy function for backwards compatibility
@@ -250,7 +273,8 @@ contract DclexRouter is Ownable, IDclexSwapCallback {
                 inputAmount = _swapUsdcToAMMExactOutput(
                     address(weth),
                     exactOutputAmount,
-                    address(this)
+                    address(this),
+                    maxInputAmount
                 );
                 weth.withdraw(exactOutputAmount);
                 _sendEth(msg.sender, exactOutputAmount);
@@ -258,7 +282,8 @@ contract DclexRouter is Ownable, IDclexSwapCallback {
                 inputAmount = _swapUsdcToAMMExactOutput(
                     normalizedToken,
                     exactOutputAmount,
-                    msg.sender
+                    msg.sender,
+                    maxInputAmount
                 );
             }
             // Refund unused USDC
@@ -273,6 +298,7 @@ contract DclexRouter is Ownable, IDclexSwapCallback {
         if (inputAmount > maxInputAmount) {
             revert DclexRouter__InputTooHigh();
         }
+        _refundEth();
     }
 
     function sellExactOutput(
@@ -301,10 +327,9 @@ contract DclexRouter is Ownable, IDclexSwapCallback {
         } else if (poolType == PoolType.AMM) {
             // For native DEL (address(0)), wrap to wDEL first
             if (token == address(0)) {
-                require(
-                    msg.value == maxInputAmount,
-                    "DclexRouter: msg.value mismatch"
-                );
+                if (msg.value != maxInputAmount) {
+                    revert DclexRouter__MsgValueMismatch();
+                }
                 weth.deposit{value: maxInputAmount}();
             } else {
                 // AMM: pull max token from user
@@ -336,6 +361,7 @@ contract DclexRouter is Ownable, IDclexSwapCallback {
         if (inputAmount > maxInputAmount) {
             revert DclexRouter__InputTooHigh();
         }
+        _refundEth();
     }
 
     function buyExactInput(
@@ -388,6 +414,7 @@ contract DclexRouter is Ownable, IDclexSwapCallback {
         if (outputAmount < minOutputAmount) {
             revert DclexRouter__OutputTooLow();
         }
+        _refundEth();
     }
 
     function sellExactInput(
@@ -416,10 +443,9 @@ contract DclexRouter is Ownable, IDclexSwapCallback {
         } else if (poolType == PoolType.AMM) {
             // For native DEL (address(0)), wrap to wDEL first
             if (token == address(0)) {
-                require(
-                    msg.value == exactInputAmount,
-                    "DclexRouter: msg.value mismatch"
-                );
+                if (msg.value != exactInputAmount) {
+                    revert DclexRouter__MsgValueMismatch();
+                }
                 weth.deposit{value: exactInputAmount}();
             } else {
                 // AMM: pull token from user
@@ -442,6 +468,7 @@ contract DclexRouter is Ownable, IDclexSwapCallback {
         if (outputAmount < minOutputAmount) {
             revert DclexRouter__OutputTooLow();
         }
+        _refundEth();
     }
 
     // ============ Cross-Pool Swap Functions ============
@@ -459,8 +486,14 @@ contract DclexRouter is Ownable, IDclexSwapCallback {
 
         // Step 1: Input -> USDC
         if (inputToken == address(0)) {
-            // ETH input: update price feeds first, then swap via V3
-            _updatePriceFeeds(outputToken, pythUpdateData);
+            // ETH input: Pyth updates not allowed since msg.value is needed for swap
+            if (pythUpdateData.length > 0) {
+                revert DclexRouter__PythUpdatesNotAllowedForEthInput();
+            }
+            // For ETH input, msg.value must equal exactInputAmount
+            if (msg.value != exactInputAmount) {
+                revert DclexRouter__MsgValueMismatch();
+            }
             usdcAmount = _swapEthToUsdcExactInput(exactInputAmount);
         } else {
             PoolType inputType = stockPoolType[inputToken];
@@ -578,38 +611,50 @@ contract DclexRouter is Ownable, IDclexSwapCallback {
                     pythUpdateData
                 );
             } else if (outputType == PoolType.AMM) {
-                // 1. Acquire USDC from input first (sell input tokens)
-                uint256 usdcAcquired = _acquireUsdcFromInput(
+                // AMM output: need to acquire USDC from input, then swap to output
+                _executeAMMOutputSwap(
                     inputToken,
+                    outputToken,
+                    exactOutputAmount,
                     maxInputAmount,
                     msg.sender,
                     pythUpdateData
                 );
-
-                // 2. Now swap USDC → output token (exact output)
-                uint256 usdcUsed = _swapUsdcToAMMExactOutput(
-                    outputToken,
-                    exactOutputAmount,
-                    msg.sender
-                );
-
-                // 3. Check we had enough
-                if (usdcUsed > usdcAcquired) {
-                    revert DclexRouter__InputTooHigh();
-                }
             } else {
                 revert DclexRouter__UnknownToken();
             }
         } else {
             // ETH output via V3
+            PoolType inputType = stockPoolType[inputToken];
             _updatePriceFeeds(inputToken, pythUpdateData);
+
+            // For AMM input, transfer max tokens to router first
+            if (inputType == PoolType.AMM) {
+                IERC20(inputToken).safeTransferFrom(
+                    msg.sender,
+                    address(this),
+                    maxInputAmount
+                );
+            }
+
             uint256 inputAmount = _swapInputToEthExactOutput(
                 inputToken,
                 exactOutputAmount,
+                maxInputAmount,
                 msg.sender
             );
             if (inputAmount > maxInputAmount) {
                 revert DclexRouter__InputTooHigh();
+            }
+
+            // For AMM input, refund any unused input tokens
+            if (inputType == PoolType.AMM) {
+                uint256 remainingInput = IERC20(inputToken).balanceOf(
+                    address(this)
+                );
+                if (remainingInput > 0) {
+                    IERC20(inputToken).safeTransfer(msg.sender, remainingInput);
+                }
             }
         }
     }
@@ -649,7 +694,7 @@ contract DclexRouter is Ownable, IDclexSwapCallback {
                 ISwapRouter.ExactInputSingleParams({
                     tokenIn: address(weth),
                     tokenOut: address(usdc),
-                    fee: V3_FEE_TIER,
+                    fee: WETH_USDC_FEE_TIER,
                     recipient: address(this),
                     deadline: block.timestamp,
                     amountIn: ethAmount,
@@ -668,7 +713,7 @@ contract DclexRouter is Ownable, IDclexSwapCallback {
             ISwapRouter.ExactInputSingleParams({
                 tokenIn: address(usdc),
                 tokenOut: address(weth),
-                fee: V3_FEE_TIER,
+                fee: WETH_USDC_FEE_TIER,
                 recipient: address(this),
                 deadline: block.timestamp,
                 amountIn: usdcAmount,
@@ -697,7 +742,7 @@ contract DclexRouter is Ownable, IDclexSwapCallback {
             ISwapRouter.ExactOutputSingleParams({
                 tokenIn: address(weth),
                 tokenOut: address(usdc),
-                fee: V3_FEE_TIER,
+                fee: WETH_USDC_FEE_TIER,
                 recipient: recipient,
                 deadline: block.timestamp,
                 amountOut: usdcAmount,
@@ -718,59 +763,69 @@ contract DclexRouter is Ownable, IDclexSwapCallback {
     function _swapInputToEthExactOutput(
         address inputToken,
         uint256 ethOutputAmount,
+        uint256 maxInputAmount,
         address recipient
     ) private returns (uint256) {
-        // First get USDC amount needed for this ETH output
-        // Use V3 to swap USDC -> ETH exact output
-        uint256 usdcNeeded = _getUsdcForEthOutput(ethOutputAmount);
-
-        // Get USDC from input token
         uint256 inputAmount;
+        uint256 usdcAcquired;
+
         PoolType inputType = stockPoolType[inputToken];
         if (inputType == PoolType.CUSTOM) {
-            inputAmount = stockToCustomPool[inputToken].swapExactOutput(
-                false,
-                usdcNeeded,
-                address(this),
+            // For CUSTOM input, use callback-based exact input swap
+            // Sell up to maxInputAmount of input tokens to acquire USDC
+            usdcAcquired = stockToCustomPool[inputToken].swapExactInput(
+                false, // selling stock for USDC (not buying)
+                maxInputAmount, // max input we're willing to spend
+                address(this), // USDC goes to router
                 abi.encode(
                     DclexSwapCallbackData(recipient, false, address(0), 0)
                 ),
                 new bytes[](0)
             );
+            inputAmount = maxInputAmount; // For CUSTOM, we sold exactly maxInputAmount
         } else if (inputType == PoolType.AMM) {
-            inputAmount = _swapAMMToUsdcExactOutput(
-                inputToken,
-                usdcNeeded,
-                address(this)
-            );
+            // For AMM input, tokens should already be transferred by caller
+            uint256 tokenBalance = IERC20(inputToken).balanceOf(address(this));
+            if (tokenBalance == 0) {
+                revert DclexRouter__InputTooHigh(); // No tokens to swap
+            }
+            usdcAcquired = _swapAMMToUsdcExactInput(inputToken, tokenBalance);
+            inputAmount = tokenBalance;
         } else {
             revert DclexRouter__UnknownToken();
         }
 
-        // Now swap USDC -> ETH exact input (we have exact USDC amount)
-        uint256 ethReceived = _swapUsdcToEthExactInput(usdcNeeded);
-        _sendEth(recipient, ethReceived);
+        // Now swap USDC -> ETH exact output
+        uint256 usdcUsed = _swapUsdcToEthExactOutput(ethOutputAmount, usdcAcquired);
+
+        // Refund excess USDC to recipient
+        uint256 excessUsdc = usdcAcquired - usdcUsed;
+        if (excessUsdc > 0) {
+            usdc.safeTransfer(recipient, excessUsdc);
+        }
 
         return inputAmount;
     }
 
-    function _getUsdcForEthOutput(uint256 ethAmount) private returns (uint256) {
-        // Estimate by doing a small calculation based on pool
-        // For simplicity, we do an exact output swap to get exact USDC needed
-        usdc.safeIncreaseAllowance(address(v3SwapRouter), type(uint256).max);
+    /// @notice Swap USDC to ETH with exact output
+    /// @param ethAmount The exact amount of ETH to receive
+    /// @param maxUsdcAmount The maximum USDC to spend
+    /// @return usdcUsed The amount of USDC actually spent
+    function _swapUsdcToEthExactOutput(
+        uint256 ethAmount,
+        uint256 maxUsdcAmount
+    ) private returns (uint256) {
+        usdc.safeIncreaseAllowance(address(v3SwapRouter), maxUsdcAmount);
 
-        uint256 usdcBalance = usdc.balanceOf(address(this));
         uint256 usdcUsed = v3SwapRouter.exactOutputSingle(
             ISwapRouter.ExactOutputSingleParams({
                 tokenIn: address(usdc),
                 tokenOut: address(weth),
-                fee: V3_FEE_TIER,
+                fee: WETH_USDC_FEE_TIER,
                 recipient: address(this),
                 deadline: block.timestamp,
                 amountOut: ethAmount,
-                amountInMaximum: usdcBalance > 0
-                    ? usdcBalance
-                    : type(uint256).max,
+                amountInMaximum: maxUsdcAmount,
                 sqrtPriceLimitX96: 0
             })
         );
@@ -794,7 +849,7 @@ contract DclexRouter is Ownable, IDclexSwapCallback {
                 ISwapRouter.ExactInputSingleParams({
                     tokenIn: token,
                     tokenOut: address(usdc),
-                    fee: V3_FEE_TIER,
+                    fee: _getFeeTier(token),
                     recipient: address(this),
                     deadline: block.timestamp,
                     amountIn: amount,
@@ -816,7 +871,7 @@ contract DclexRouter is Ownable, IDclexSwapCallback {
                 ISwapRouter.ExactInputSingleParams({
                     tokenIn: address(usdc),
                     tokenOut: token,
-                    fee: V3_FEE_TIER,
+                    fee: _getFeeTier(token),
                     recipient: recipient,
                     deadline: block.timestamp,
                     amountIn: usdcAmount,
@@ -842,7 +897,7 @@ contract DclexRouter is Ownable, IDclexSwapCallback {
                 ISwapRouter.ExactOutputSingleParams({
                     tokenIn: token,
                     tokenOut: address(usdc),
-                    fee: V3_FEE_TIER,
+                    fee: _getFeeTier(token),
                     recipient: recipient,
                     deadline: block.timestamp,
                     amountOut: usdcAmount,
@@ -855,27 +910,116 @@ contract DclexRouter is Ownable, IDclexSwapCallback {
     function _swapUsdcToAMMExactOutput(
         address token,
         uint256 tokenAmount,
-        address recipient
+        address recipient,
+        uint256 maxUsdcAmount
     ) private returns (uint256) {
-        uint256 usdcBalance = usdc.balanceOf(address(this));
-        usdc.safeIncreaseAllowance(address(v3SwapRouter), usdcBalance);
+        usdc.safeIncreaseAllowance(address(v3SwapRouter), maxUsdcAmount);
 
         return
             v3SwapRouter.exactOutputSingle(
                 ISwapRouter.ExactOutputSingleParams({
                     tokenIn: address(usdc),
                     tokenOut: token,
-                    fee: V3_FEE_TIER,
+                    fee: _getFeeTier(token),
                     recipient: recipient,
                     deadline: block.timestamp,
                     amountOut: tokenAmount,
-                    amountInMaximum: usdcBalance,
+                    amountInMaximum: maxUsdcAmount,
                     sqrtPriceLimitX96: 0
                 })
             );
     }
 
     // ============ Helper Functions ============
+
+    /// @notice Execute a swap where output is an AMM token
+    /// @dev Handles input -> USDC -> AMM output flow with proper token transfers and refunds
+    function _executeAMMOutputSwap(
+        address inputToken,
+        address outputToken,
+        uint256 exactOutputAmount,
+        uint256 maxInputAmount,
+        address payer,
+        bytes[] calldata pythUpdateData
+    ) private {
+        uint256 usdcAcquired;
+        uint256 inputUsed;
+
+        if (inputToken == address(0)) {
+            // ETH input: Pyth updates not allowed since msg.value is needed for swap
+            if (pythUpdateData.length > 0) {
+                revert DclexRouter__PythUpdatesNotAllowedForEthInput();
+            }
+            // For ETH input, msg.value must equal maxInputAmount
+            if (msg.value != maxInputAmount) {
+                revert DclexRouter__MsgValueMismatch();
+            }
+            // ETH input: swap ETH -> USDC (exact input using all ETH)
+            usdcAcquired = _swapEthToUsdcExactInput(maxInputAmount);
+            inputUsed = maxInputAmount;
+        } else {
+            PoolType inputType = stockPoolType[inputToken];
+            if (inputType == PoolType.CUSTOM) {
+                // CUSTOM input: use callback-based swap (exact output to get needed USDC)
+                // This will pull tokens from payer via callback
+                inputUsed = stockToCustomPool[inputToken].swapExactOutput{
+                    value: msg.value
+                }(
+                    false,
+                    type(uint256).max, // We'll limit by maxInputAmount check later
+                    address(this),
+                    abi.encode(
+                        DclexSwapCallbackData(payer, false, address(0), 0)
+                    ),
+                    pythUpdateData
+                );
+                usdcAcquired = usdc.balanceOf(address(this));
+            } else if (inputType == PoolType.AMM) {
+                // AMM input: pull tokens from payer, then swap to USDC
+                IERC20(inputToken).safeTransferFrom(
+                    payer,
+                    address(this),
+                    maxInputAmount
+                );
+                usdcAcquired = _swapAMMToUsdcExactInput(inputToken, maxInputAmount);
+                inputUsed = maxInputAmount;
+            } else {
+                revert DclexRouter__UnknownToken();
+            }
+        }
+
+        // Now swap USDC -> output token (exact output)
+        uint256 usdcUsed = _swapUsdcToAMMExactOutput(
+            outputToken,
+            exactOutputAmount,
+            payer,
+            usdcAcquired
+        );
+
+        // Check we had enough USDC
+        if (usdcUsed > usdcAcquired) {
+            revert DclexRouter__InputTooHigh();
+        }
+
+        // Refund excess USDC
+        uint256 excessUsdc = usdcAcquired - usdcUsed;
+        if (excessUsdc > 0) {
+            usdc.safeTransfer(payer, excessUsdc);
+        }
+
+        // For AMM input, refund any unused input tokens (shouldn't happen with exact input, but safety)
+        if (inputToken != address(0) && stockPoolType[inputToken] == PoolType.AMM) {
+            uint256 remainingInput = IERC20(inputToken).balanceOf(address(this));
+            if (remainingInput > 0) {
+                IERC20(inputToken).safeTransfer(payer, remainingInput);
+            }
+        }
+
+        // For CUSTOM input, verify we didn't exceed max
+        if (inputUsed > maxInputAmount) {
+            revert DclexRouter__InputTooHigh();
+        }
+    }
 
     function _acquireUsdcFromInput(
         address inputToken,

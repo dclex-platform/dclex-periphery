@@ -221,7 +221,7 @@ contract DeployAMMStocks is Script {
         // Register wDEL with router as AMM pool so it appears in allStockTokens()
         // Do this BEFORE liquidity so even if liquidity fails, wDEL is registered
         vm.startBroadcast();
-        _router.setAMMPool(address(_weth), poolAddr);
+        _router.setAMMPool(address(_weth), poolAddr, 3000);
         console.log("Registered wDEL with router as AMM pool");
         vm.stopBroadcast();
 
@@ -435,7 +435,7 @@ contract DeployAMMStocks is Script {
         console.log("Minted USDC to liquidity helper:", usdcNeeded);
 
         // 5. Register with router as AMM pool
-        _router.setAMMPool(stockAddr, poolAddr);
+        _router.setAMMPool(stockAddr, poolAddr, 3000);
         console.log("Registered AMM pool for", symbol);
         vm.stopBroadcast();
 

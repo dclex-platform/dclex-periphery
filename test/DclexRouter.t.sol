@@ -1135,7 +1135,7 @@ contract DclexRouterTest is Test, TestBalance {
         address mockAMMPool = makeAddr("mockAMMPool");
 
         vm.prank(ADMIN);
-        dclexRouter.setAMMPool(address(amznStock), mockAMMPool);
+        dclexRouter.setAMMPool(address(amznStock), mockAMMPool, 3000);
 
         assertEq(
             uint256(dclexRouter.getPoolType(address(amznStock))),
@@ -1148,10 +1148,10 @@ contract DclexRouterTest is Test, TestBalance {
         address mockAMMPool = makeAddr("mockAMMPool");
 
         vm.prank(ADMIN);
-        dclexRouter.setAMMPool(address(amznStock), mockAMMPool);
+        dclexRouter.setAMMPool(address(amznStock), mockAMMPool, 3000);
 
         vm.prank(ADMIN);
-        dclexRouter.setAMMPool(address(amznStock), address(0));
+        dclexRouter.setAMMPool(address(amznStock), address(0), 0);
 
         assertEq(
             uint256(dclexRouter.getPoolType(address(amznStock))),
