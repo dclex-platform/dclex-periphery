@@ -6,8 +6,8 @@ import {
     ISwapRouter
 } from "@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
 import {
-    IWETH9
-} from "@uniswap/v3-periphery/contracts/interfaces/external/IWETH9.sol";
+    IQuoter
+} from "@uniswap/v3-periphery/contracts/interfaces/IQuoter.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 contract HelperConfig is Script {
@@ -15,7 +15,7 @@ contract HelperConfig is Script {
 
     struct NetworkConfig {
         ISwapRouter v3SwapRouter;
-        IWETH9 weth; // wDEL
+        IQuoter v3Quoter;
         IERC20 usdcToken;
         address admin;
     }
@@ -46,10 +46,8 @@ contract HelperConfig is Script {
         // V3 infrastructure addresses for Primelta dev chain
         // These will be deployed by DeployV3Infrastructure script
         primeltaDevNetworkConfig = NetworkConfig({
-            v3SwapRouter: ISwapRouter(
-                0x0000000000000000000000000000000000000000
-            ), // Will be set after deployment
-            weth: IWETH9(0x0000000000000000000000000000000000000000), // Will be set after deployment
+            v3SwapRouter: ISwapRouter(address(0)),
+            v3Quoter: IQuoter(address(0)),
             usdcToken: usdcToken,
             admin: 0x70997970C51812dc3A010C7d01b50e0d17dc79C8
         });
@@ -66,8 +64,8 @@ contract HelperConfig is Script {
         // For local testing, these will be deployed by test setup
         // Use Anvil account #1 as admin (same as ADMIN_KEY in deploy script)
         localNetworkConfig = NetworkConfig({
-            v3SwapRouter: ISwapRouter(address(0)), // Will be set by test
-            weth: IWETH9(address(0)), // Will be set by test
+            v3SwapRouter: ISwapRouter(address(0)),
+            v3Quoter: IQuoter(address(0)),
             usdcToken: usdcToken,
             admin: 0x70997970C51812dc3A010C7d01b50e0d17dc79C8
         });

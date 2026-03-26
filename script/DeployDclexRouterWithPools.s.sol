@@ -15,7 +15,7 @@ import {
 import {DclexRouter} from "src/DclexRouter.sol";
 import {HelperConfig as DclexPeripheryHelperConfig} from "./HelperConfig.s.sol";
 import {ISwapRouter} from "@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
-import {IWETH9} from "@uniswap/v3-periphery/contracts/interfaces/external/IWETH9.sol";
+import {IQuoter} from "@uniswap/v3-periphery/contracts/interfaces/IQuoter.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 contract DeployRouterWithPools is Script {
@@ -24,7 +24,7 @@ contract DeployRouterWithPools is Script {
         Factory stocksFactory;
         uint256 maxPriceStaleness;
         ISwapRouter v3SwapRouter;
-        IWETH9 weth;
+        IQuoter v3Quoter;
     }
 
     // Struct to bundle return values
@@ -40,7 +40,7 @@ contract DeployRouterWithPools is Script {
         Factory stocksFactory,
         uint256 maxPriceStaleness,
         ISwapRouter v3SwapRouter,
-        IWETH9 weth
+        IQuoter v3Quoter
     )
         external
         returns (
@@ -55,7 +55,7 @@ contract DeployRouterWithPools is Script {
             stocksFactory: stocksFactory,
             maxPriceStaleness: maxPriceStaleness,
             v3SwapRouter: v3SwapRouter,
-            weth: weth
+            v3Quoter: v3Quoter
         });
 
         DeploymentResult memory result = _deploy(ctx);
@@ -84,11 +84,13 @@ contract DeployRouterWithPools is Script {
         ISwapRouter swapRouter = address(ctx.v3SwapRouter) != address(0)
             ? ctx.v3SwapRouter
             : result.config.v3SwapRouter;
-        IWETH9 wethToken = address(ctx.weth) != address(0) ? ctx.weth : result.config.weth;
 
         // Deploy router
         vm.startBroadcast();
-        result.router = new DclexRouter(swapRouter, wethToken, result.config.usdcToken);
+        IQuoter quoter = address(ctx.v3Quoter) != address(0)
+            ? ctx.v3Quoter
+            : result.config.v3Quoter;
+        result.router = new DclexRouter(swapRouter, quoter, result.config.usdcToken);
         vm.stopBroadcast();
 
         // Deploy pools
@@ -155,7 +157,7 @@ contract DeployRouterWithPools is Script {
             stocksFactory: stocksFactory,
             maxPriceStaleness: maxPriceStaleness,
             v3SwapRouter: ISwapRouter(address(0)),
-            weth: IWETH9(address(0))
+            v3Quoter: IQuoter(address(0))
         });
 
         DeploymentResult memory result = _deploy(ctx);

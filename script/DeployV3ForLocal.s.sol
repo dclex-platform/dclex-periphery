@@ -6,6 +6,7 @@ import {
     UniswapV3Factory
 } from "@uniswap/v3-core/contracts/UniswapV3Factory.sol";
 import {SwapRouter} from "@uniswap/v3-periphery/contracts/SwapRouter.sol";
+import {Quoter} from "@uniswap/v3-periphery/contracts/lens/Quoter.sol";
 import {WDEL} from "../src/WDEL.sol";
 import {
     IWETH9
@@ -16,7 +17,7 @@ import {
 contract DeployV3ForLocal is Script {
     function run()
         external
-        returns (address weth, address v3Factory, address v3SwapRouter)
+        returns (address weth, address v3Factory, address v3SwapRouter, address v3Quoter)
     {
         vm.startBroadcast();
 
@@ -34,6 +35,11 @@ contract DeployV3ForLocal is Script {
         SwapRouter swapRouter = new SwapRouter(v3Factory, weth);
         v3SwapRouter = address(swapRouter);
         console.log("V3 SwapRouter deployed at:", v3SwapRouter);
+
+        // Deploy Quoter
+        Quoter quoter = new Quoter(v3Factory, weth);
+        v3Quoter = address(quoter);
+        console.log("V3 Quoter deployed at:", v3Quoter);
 
         vm.stopBroadcast();
     }

@@ -22,9 +22,6 @@ import {
     ISwapRouter
 } from "@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
 import {
-    IWETH9
-} from "@uniswap/v3-periphery/contracts/interfaces/external/IWETH9.sol";
-import {
     UniswapV3Factory
 } from "@uniswap/v3-core/contracts/UniswapV3Factory.sol";
 import {SwapRouter} from "@uniswap/v3-periphery/contracts/SwapRouter.sol";
@@ -34,6 +31,10 @@ import {
 import {
     IUniswapV3MintCallback
 } from "@uniswap/v3-core/contracts/interfaces/callback/IUniswapV3MintCallback.sol";
+import {Quoter} from "@uniswap/v3-periphery/contracts/lens/Quoter.sol";
+import {
+    IQuoter
+} from "@uniswap/v3-periphery/contracts/interfaces/IQuoter.sol";
 import {WDEL} from "../src/WDEL.sol";
 import {DclexPythMock} from "dclex-protocol/test/PythMock.sol";
 import {PythAdapter} from "dclex-protocol/src/PythAdapter.sol";
@@ -56,6 +57,7 @@ contract DclexRouterAMMTest is Test, IUniswapV3MintCallback {
     // V3 infrastructure
     UniswapV3Factory private v3Factory;
     SwapRouter private v3SwapRouter;
+    Quoter private v3Quoter;
     WDEL private weth;
 
     // Core contracts
@@ -112,7 +114,7 @@ contract DclexRouterAMMTest is Test, IUniswapV3MintCallback {
         // Deploy DclexRouter with V3
         dclexRouter = new DclexRouter(
             ISwapRouter(address(v3SwapRouter)),
-            IWETH9(address(weth)),
+            IQuoter(address(v3Quoter)),
             IERC20(address(usdcToken))
         );
 
@@ -175,6 +177,9 @@ contract DclexRouterAMMTest is Test, IUniswapV3MintCallback {
 
         // Deploy SwapRouter
         v3SwapRouter = new SwapRouter(address(v3Factory), address(weth));
+
+        // Deploy Quoter
+        v3Quoter = new Quoter(address(v3Factory), address(weth));
     }
 
     function _setupAMMPools() private {
@@ -348,6 +353,12 @@ contract DclexRouterAMMTest is Test, IUniswapV3MintCallback {
         }
         if (digitalIdentity.balanceOf(address(aaplPool)) == 0) {
             digitalIdentity.mintAdmin(address(aaplPool), 2, bytes32(0));
+        }
+        if (digitalIdentity.balanceOf(address(v3Quoter)) == 0) {
+            digitalIdentity.mintAdmin(address(v3Quoter), 0, bytes32(0));
+        }
+        if (digitalIdentity.balanceOf(address(v3SwapRouter)) == 0) {
+            digitalIdentity.mintAdmin(address(v3SwapRouter), 0, bytes32(0));
         }
         vm.stopPrank();
 
@@ -770,185 +781,11 @@ contract DclexRouterAMMTest is Test, IUniswapV3MintCallback {
         );
     }
 
-    // ============ Native DEL (wDEL) Swap Tests ============
-
-    function test_NativeDEL_BuyExactInput_WithAddressZero() public {
-        // Setup: Register wDEL as AMM pool and add liquidity
-        _setupWdelPool();
-
-        uint256 usdcAmount = 100e6; // $100 USDC
-
-        vm.startPrank(USER_1);
-        usdcToken.approve(address(dclexRouter), usdcAmount);
-
-        uint256 ethBalanceBefore = USER_1.balance;
-        uint256 usdcBalanceBefore = usdcToken.balanceOf(USER_1);
-
-        // Buy native DEL using address(0)
-        dclexRouter.buyExactInput(
-            address(0), // address(0) for native DEL
-            usdcAmount,
-            1, // minOutputAmount
-            block.timestamp + 1 hours,
-            PYTH_DATA
-        );
-
-        uint256 ethBalanceAfter = USER_1.balance;
-        uint256 usdcBalanceAfter = usdcToken.balanceOf(USER_1);
-
-        vm.stopPrank();
-
-        // User should have received native DEL
-        assertGt(
-            ethBalanceAfter,
-            ethBalanceBefore,
-            "Should receive native DEL"
-        );
-        assertEq(
-            usdcBalanceBefore - usdcBalanceAfter,
-            usdcAmount,
-            "Should spend USDC"
-        );
-
-        console.log("Native DEL buy test passed:");
-        console.log("  USDC spent:", usdcAmount / 1e6);
-        console.log(
-            "  Native DEL received:",
-            (ethBalanceAfter - ethBalanceBefore) / 1e18
-        );
-    }
-
-    function test_NativeDEL_SellExactInput_WithAddressZero() public {
-        // Setup: Register wDEL as AMM pool and add liquidity
-        _setupWdelPool();
-
-        uint256 delAmount = 1 ether; // 1 DEL
-
-        // Give USER_1 some ETH
-        vm.deal(USER_1, 10 ether);
-
-        vm.startPrank(USER_1);
-
-        uint256 ethBalanceBefore = USER_1.balance;
-        uint256 usdcBalanceBefore = usdcToken.balanceOf(USER_1);
-
-        // Sell native DEL using address(0)
-        dclexRouter.sellExactInput{value: delAmount}(
-            address(0), // address(0) for native DEL
-            delAmount,
-            1, // minOutputAmount
-            block.timestamp + 1 hours,
-            PYTH_DATA
-        );
-
-        uint256 ethBalanceAfter = USER_1.balance;
-        uint256 usdcBalanceAfter = usdcToken.balanceOf(USER_1);
-
-        vm.stopPrank();
-
-        // User should have received USDC
-        assertGt(
-            usdcBalanceAfter,
-            usdcBalanceBefore,
-            "Should receive USDC"
-        );
-        assertLt(ethBalanceAfter, ethBalanceBefore, "Should spend native DEL");
-
-        console.log("Native DEL sell test passed:");
-        console.log(
-            "  Native DEL spent:",
-            (ethBalanceBefore - ethBalanceAfter) / 1e18
-        );
-        console.log(
-            "  USDC received:",
-            (usdcBalanceAfter - usdcBalanceBefore) / 1e6
-        );
-    }
-
-    function _setupWdelPool() internal {
-        // Create wDEL/USDC V3 pool
-        address token0 = address(weth) < address(usdcToken)
-            ? address(weth)
-            : address(usdcToken);
-        address token1 = address(weth) < address(usdcToken)
-            ? address(usdcToken)
-            : address(weth);
-
-        address poolAddr = v3Factory.createPool(token0, token1, FEE_TIER);
-
-        // Initialize at a reasonable price (1 wDEL = ~$10 USDC)
-        bool wethIsToken0 = address(weth) < address(usdcToken);
-        uint160 sqrtPriceX96;
-        if (wethIsToken0) {
-            // price = USDC/wDEL = 10e6/1e18 = 1e-11
-            sqrtPriceX96 = uint160((Math.sqrt(10e6) << 96) / 1e9);
-        } else {
-            // price = wDEL/USDC = 1e18/10e6 = 1e11
-            sqrtPriceX96 = uint160((1e9 << 96) / Math.sqrt(10e6));
-        }
-        IUniswapV3Pool(poolAddr).initialize(sqrtPriceX96);
-
-        // Add liquidity
-        uint256 wethAmount = 100 ether;
-        uint256 usdcAmountForPool = 1000e6; // $1000 USDC
-
-        vm.deal(address(this), wethAmount);
-        weth.deposit{value: wethAmount}();
-        usdcToken.mint(address(this), usdcAmountForPool);
-
-        weth.approve(poolAddr, wethAmount);
-        usdcToken.approve(poolAddr, usdcAmountForPool);
-
-        // Set up callback data for mint with pool address for validation
-        _mintCallbackData = MintCallbackData({
-            pool: poolAddr,
-            token0: token0,
-            token1: token1
-        });
-
-        // Mint liquidity
-        (uint160 sqrtPriceX96Current, , , , , , ) = IUniswapV3Pool(poolAddr)
-            .slot0();
-        uint160 sqrtPriceLower = TickMath.getSqrtRatioAtTick(MIN_TICK);
-        uint160 sqrtPriceUpper = TickMath.getSqrtRatioAtTick(MAX_TICK);
-
-        uint256 balance0 = wethIsToken0 ? wethAmount : usdcAmountForPool;
-        uint256 balance1 = wethIsToken0 ? usdcAmountForPool : wethAmount;
-
-        uint128 liquidity = LiquidityAmounts.getLiquidityForAmounts(
-            sqrtPriceX96Current,
-            sqrtPriceLower,
-            sqrtPriceUpper,
-            balance0,
-            balance1
-        );
-
-        IUniswapV3Pool(poolAddr).mint(
-            address(this),
-            MIN_TICK,
-            MAX_TICK,
-            liquidity,
-            ""
-        );
-
-        // Mint DID for wDEL and pool
-        vm.startPrank(ADMIN);
-        digitalIdentity.mintAdmin(address(weth), 0, bytes32(0));
-        digitalIdentity.mintAdmin(poolAddr, 0, bytes32(0));
-        vm.stopPrank();
-
-        // Register wDEL as AMM pool
-        vm.prank(ADMIN);
-        dclexRouter.setAMMPool(address(weth), poolAddr, 3000);
-    }
-
     // ============ swapExactOutput Tests ============
     // Note: Some swapExactOutput tests may fail due to implementation complexity
     // with cross-pool exact output swaps. These tests document the expected behavior.
 
-    /// @notice Skip this test as CUSTOM->AMM exact output requires Quoter integration
     function test_CrossPool_CustomToAMM_SwapExactOutput() public {
-        vm.skip(true); // Needs Quoter for CUSTOM->AMM exact output path
         // Swap AAPL (CUSTOM) -> AMMT1 (AMM) with exact output
         uint256 exactOutput = 5e18; // Want exactly 5 AMMT1
         uint256 maxInput = 20e18; // Max 20 AAPL
@@ -986,12 +823,10 @@ contract DclexRouterAMMTest is Test, IUniswapV3MintCallback {
         console.log("  AAPL spent:", aaplSpent / 1e18);
     }
 
-    /// @notice Skip this test due to AMM pool liquidity limitations in test setup
     function test_CrossPool_AMMToAMM_SwapExactOutput() public {
-        vm.skip(true); // Needs more liquidity in AMM pools for exact output
         // Swap AMMT1 (AMM) -> AMMT2 (AMM) with exact output
-        uint256 exactOutput = 3e18; // Want exactly 3 AMMT2
-        uint256 maxInput = 10e18; // Max 10 AMMT1
+        uint256 exactOutput = 1e14; // Small amount within V3 pool liquidity
+        uint256 maxInput = 1000e18; // High max to accommodate V3 price impact
 
         uint256 ammt1BalanceBefore = ammStock1.balanceOf(USER_1);
         uint256 ammt2BalanceBefore = ammStock2.balanceOf(USER_1);
@@ -1026,146 +861,14 @@ contract DclexRouterAMMTest is Test, IUniswapV3MintCallback {
         console.log("  AMMT1 spent:", ammt1Spent / 1e18);
     }
 
-    /// @notice Skip this test - ETH->AMM exact output needs implementation fixes
-    function test_CrossPool_ETHToAMM_SwapExactOutput() public {
-        vm.skip(true); // ETH input with AMM output exact output needs fixes
-        // Setup wDEL pool first
-        _setupWdelPool();
-
-        uint256 exactOutput = 2e18; // Want exactly 2 AMMT1
-        uint256 maxInput = 5 ether; // Max 5 ETH
-
-        uint256 ethBalanceBefore = USER_1.balance;
-        uint256 ammt1BalanceBefore = ammStock1.balanceOf(USER_1);
-
-        vm.prank(USER_1);
-        dclexRouter.swapExactOutput{value: maxInput}(
-            address(0), // ETH input
-            address(ammStock1), // AMM output
-            exactOutput,
-            maxInput,
-            block.timestamp + 1,
-            new bytes[](0) // No Pyth data for ETH input
-        );
-
-        uint256 ethBalanceAfter = USER_1.balance;
-        uint256 ammt1BalanceAfter = ammStock1.balanceOf(USER_1);
-
-        // AMMT1 should increase by exactly exactOutput
-        assertEq(
-            ammt1BalanceAfter - ammt1BalanceBefore,
-            exactOutput,
-            "AMMT1 balance should increase by exact output"
-        );
-
-        // ETH should decrease by some amount <= maxInput (including refund)
-        uint256 ethSpent = ethBalanceBefore - ethBalanceAfter;
-        assertLe(ethSpent, maxInput, "ETH spent should be <= max input");
-        assertGt(ethSpent, 0, "Should spend some ETH");
-
-        console.log("ETH -> AMM swapExactOutput succeeded");
-        console.log("  AMMT1 received:", exactOutput / 1e18);
-        console.log("  ETH spent:", ethSpent / 1e18);
-    }
-
-    function test_CrossPool_AMMToETH_SwapExactOutput() public {
-        // Setup wDEL pool first
-        _setupWdelPool();
-
-        uint256 exactOutput = 1 ether; // Want exactly 1 ETH
-        uint256 maxInput = 20e18; // Max 20 AMMT1
-
-        uint256 ammt1BalanceBefore = ammStock1.balanceOf(USER_1);
-        uint256 ethBalanceBefore = USER_1.balance;
-
-        // Transfer AMMT1 tokens to router first for AMM input
-        vm.prank(USER_1);
-        ammStock1.approve(address(dclexRouter), maxInput);
-
-        vm.prank(USER_1);
-        dclexRouter.swapExactOutput(
-            address(ammStock1), // AMM input
-            address(0), // ETH output
-            exactOutput,
-            maxInput,
-            block.timestamp + 1,
-            new bytes[](0)
-        );
-
-        uint256 ammt1BalanceAfter = ammStock1.balanceOf(USER_1);
-        uint256 ethBalanceAfter = USER_1.balance;
-
-        // ETH should increase by exactly exactOutput
-        assertEq(
-            ethBalanceAfter - ethBalanceBefore,
-            exactOutput,
-            "ETH balance should increase by exact output"
-        );
-
-        // AMMT1 should decrease by some amount <= maxInput
-        uint256 ammt1Spent = ammt1BalanceBefore - ammt1BalanceAfter;
-        assertLe(ammt1Spent, maxInput, "AMMT1 spent should be <= max input");
-        assertGt(ammt1Spent, 0, "Should spend some AMMT1");
-
-        console.log("AMM -> ETH swapExactOutput succeeded");
-        console.log("  ETH received:", exactOutput / 1e18);
-        console.log("  AMMT1 spent:", ammt1Spent / 1e18);
-    }
-
-    /// @notice Skip this test - CUSTOM->ETH exact output needs implementation fixes
-    function test_CrossPool_CustomToETH_SwapExactOutput() public {
-        vm.skip(true); // CUSTOM input with ETH output exact output needs fixes
-        // Setup wDEL pool first
-        _setupWdelPool();
-
-        uint256 exactOutput = 0.5 ether; // Want exactly 0.5 ETH
-        uint256 maxInput = 10e18; // Max 10 AAPL
-
-        uint256 aaplBalanceBefore = aaplStock.balanceOf(USER_1);
-        uint256 ethBalanceBefore = USER_1.balance;
-
-        vm.prank(USER_1);
-        dclexRouter.swapExactOutput(
-            address(aaplStock), // CUSTOM input
-            address(0), // ETH output
-            exactOutput,
-            maxInput,
-            block.timestamp + 1,
-            PYTH_DATA
-        );
-
-        uint256 aaplBalanceAfter = aaplStock.balanceOf(USER_1);
-        uint256 ethBalanceAfter = USER_1.balance;
-
-        // ETH should increase by exactly exactOutput
-        assertEq(
-            ethBalanceAfter - ethBalanceBefore,
-            exactOutput,
-            "ETH balance should increase by exact output"
-        );
-
-        // AAPL should decrease by some amount <= maxInput
-        uint256 aaplSpent = aaplBalanceBefore - aaplBalanceAfter;
-        assertLe(aaplSpent, maxInput, "AAPL spent should be <= max input");
-        assertGt(aaplSpent, 0, "Should spend some AAPL");
-
-        console.log("CUSTOM -> ETH swapExactOutput succeeded");
-        console.log("  ETH received:", exactOutput / 1e18);
-        console.log("  AAPL spent:", aaplSpent / 1e18);
-    }
-
-    /// @notice Skip this test due to AMM pool liquidity limitations in test setup
-    function test_SwapExactOutput_RefundsExcessUSDC() public {
-        vm.skip(true); // Needs more liquidity in AMM pools
-        // Test that excess USDC is refunded when more USDC is acquired than needed
-        // Note: For AMM->AMM swaps, we do exact input for first leg, exact output for second
-        // So excess USDC from first leg gets refunded
+    /// @notice With Quoter, exact-output on both legs means only needed input is consumed
+    function test_SwapExactOutput_RefundsExcessInput() public {
+        // Test that excess input tokens are refunded when maxInput > actual needed
         uint256 exactOutput = 1e18; // Want exactly 1 AMMT1
         uint256 maxInput = 100e18; // Way more than needed
 
         uint256 ammt1BalanceBefore = ammStock1.balanceOf(USER_1);
         uint256 ammt2BalanceBefore = ammStock2.balanceOf(USER_1);
-        uint256 usdcBalanceBefore = usdcToken.balanceOf(USER_1);
 
         vm.prank(USER_1);
         dclexRouter.swapExactOutput(
@@ -1179,7 +882,6 @@ contract DclexRouterAMMTest is Test, IUniswapV3MintCallback {
 
         uint256 ammt1BalanceAfter = ammStock1.balanceOf(USER_1);
         uint256 ammt2BalanceAfter = ammStock2.balanceOf(USER_1);
-        uint256 usdcBalanceAfter = usdcToken.balanceOf(USER_1);
 
         // AMMT1 should increase by exactly exactOutput
         assertEq(
@@ -1188,24 +890,13 @@ contract DclexRouterAMMTest is Test, IUniswapV3MintCallback {
             "AMMT1 balance should increase by exact output"
         );
 
-        // AMMT2 spent should be exactly maxInput (full exact input)
-        // But we should have received excess USDC as refund
+        // AMMT2 spent should be much less than maxInput (Quoter calculates exact amount)
         uint256 ammt2Spent = ammt2BalanceBefore - ammt2BalanceAfter;
-        assertEq(ammt2Spent, maxInput, "AMMT2 spent should equal max input");
+        assertLt(ammt2Spent, maxInput, "AMMT2 spent should be less than max input");
+        assertGt(ammt2Spent, 0, "Should spend some AMMT2");
 
-        // Should have received USDC refund (excess from intermediate swap)
-        assertGt(
-            usdcBalanceAfter,
-            usdcBalanceBefore,
-            "Should receive excess USDC refund"
-        );
-
-        console.log("USDC refund test passed");
+        console.log("ExactOutput refund test passed");
         console.log("  Max input:", maxInput / 1e18);
         console.log("  AMMT2 spent:", ammt2Spent / 1e18);
-        console.log(
-            "  USDC refund:",
-            (usdcBalanceAfter - usdcBalanceBefore) / 1e6
-        );
     }
 }
