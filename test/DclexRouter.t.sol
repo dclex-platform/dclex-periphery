@@ -25,12 +25,11 @@ import {
     ISwapRouter
 } from "@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
 import {
-    IWETH9
-} from "@uniswap/v3-periphery/contracts/interfaces/external/IWETH9.sol";
-import {
     UniswapV3Factory
 } from "@uniswap/v3-core/contracts/UniswapV3Factory.sol";
 import {SwapRouter} from "@uniswap/v3-periphery/contracts/SwapRouter.sol";
+import {Quoter} from "@uniswap/v3-periphery/contracts/lens/Quoter.sol";
+import {IQuoter} from "@uniswap/v3-periphery/contracts/interfaces/IQuoter.sol";
 import {
     IUniswapV3Pool
 } from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
@@ -54,6 +53,7 @@ contract DclexRouterTest is Test, TestBalance {
     // V3 infrastructure
     UniswapV3Factory private v3Factory;
     SwapRouter private v3SwapRouter;
+    Quoter private v3Quoter;
     WDEL private weth;
     address private ethUsdcPool;
 
@@ -119,6 +119,7 @@ contract DclexRouterTest is Test, TestBalance {
         weth = new WDEL();
         v3Factory = new UniswapV3Factory();
         v3SwapRouter = new SwapRouter(address(v3Factory), address(weth));
+        v3Quoter = new Quoter(address(v3Factory), address(weth));
 
         // Create and initialize ETH/USDC pool
         ethUsdcPool = v3Factory.createPool(
@@ -133,7 +134,7 @@ contract DclexRouterTest is Test, TestBalance {
         // Deploy DclexRouter with V3
         dclexRouter = new DclexRouter(
             ISwapRouter(address(v3SwapRouter)),
-            IWETH9(address(weth)),
+            IQuoter(address(v3Quoter)),
             IERC20(address(usdcToken))
         );
 

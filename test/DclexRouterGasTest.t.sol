@@ -25,15 +25,14 @@ import {
     UniswapV3Factory
 } from "@uniswap/v3-core/contracts/UniswapV3Factory.sol";
 import {SwapRouter} from "@uniswap/v3-periphery/contracts/SwapRouter.sol";
+import {Quoter} from "@uniswap/v3-periphery/contracts/lens/Quoter.sol";
+import {IQuoter} from "@uniswap/v3-periphery/contracts/interfaces/IQuoter.sol";
 import {
     ISwapRouter
 } from "@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
 import {
     IUniswapV3Pool
 } from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
-import {
-    IWETH9
-} from "@uniswap/v3-periphery/contracts/interfaces/external/IWETH9.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {WDEL} from "../src/WDEL.sol";
 import {PythAdapter} from "dclex-protocol/src/PythAdapter.sol";
@@ -58,6 +57,7 @@ contract DclexRouterGasTest is Test {
     WDEL private weth;
     UniswapV3Factory private v3Factory;
     SwapRouter private v3SwapRouter;
+    Quoter private v3Quoter;
     address private ethUsdcPool;
 
     receive() external payable {}
@@ -93,6 +93,7 @@ contract DclexRouterGasTest is Test {
         weth = new WDEL();
         v3Factory = new UniswapV3Factory();
         v3SwapRouter = new SwapRouter(address(v3Factory), address(weth));
+        v3Quoter = new Quoter(address(v3Factory), address(weth));
 
         // Create and initialize ETH/USDC V3 pool
         address token0 = address(weth) < address(usdcToken)
@@ -115,7 +116,7 @@ contract DclexRouterGasTest is Test {
         // Deploy DclexRouter with V3 infrastructure
         dclexRouter = new DclexRouter(
             ISwapRouter(address(v3SwapRouter)),
-            IWETH9(address(weth)),
+            IQuoter(address(v3Quoter)),
             IERC20(address(usdcToken))
         );
 
