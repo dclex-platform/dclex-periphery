@@ -7,17 +7,26 @@ import {
 } from "@uniswap/v3-core/contracts/UniswapV3Factory.sol";
 import {SwapRouter} from "@uniswap/v3-periphery/contracts/SwapRouter.sol";
 import {Quoter} from "@uniswap/v3-periphery/contracts/lens/Quoter.sol";
+import {
+    NonfungiblePositionManager
+} from "@uniswap/v3-periphery/contracts/NonfungiblePositionManager.sol";
 import {WDEL} from "../src/WDEL.sol";
 import {
     IWETH9
 } from "@uniswap/v3-periphery/contracts/interfaces/external/IWETH9.sol";
 
-/// @title DeployV3ForLocal
-/// @notice Deploys WETH9 Mock and V3 infrastructure for local Anvil testing
+/// @title DeployV3Infrastructure
+/// @notice Deploys full V3 infrastructure: WDEL, Factory, SwapRouter, Quoter, NonfungiblePositionManager
 contract DeployV3ForLocal is Script {
     function run()
         external
-        returns (address weth, address v3Factory, address v3SwapRouter, address v3Quoter)
+        returns (
+            address weth,
+            address v3Factory,
+            address v3SwapRouter,
+            address v3Quoter,
+            address v3PositionManager
+        )
     {
         vm.startBroadcast();
 
@@ -40,6 +49,15 @@ contract DeployV3ForLocal is Script {
         Quoter quoter = new Quoter(v3Factory, weth);
         v3Quoter = address(quoter);
         console.log("V3 Quoter deployed at:", v3Quoter);
+
+        // Deploy NonfungiblePositionManager (tokenDescriptor=address(0) for local dev)
+        NonfungiblePositionManager positionManager = new NonfungiblePositionManager(
+            v3Factory,
+            weth,
+            address(0)
+        );
+        v3PositionManager = address(positionManager);
+        console.log("V3 PositionManager deployed at:", v3PositionManager);
 
         vm.stopBroadcast();
     }
