@@ -7,6 +7,9 @@ import {
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
 contract WDEL is ERC20, IWETH9 {
+    event Deposit(address indexed dst, uint256 wad);
+    event Withdrawal(address indexed src, uint256 wad);
+
     constructor() ERC20("Wrapped DEL", "WDEL") {}
 
     receive() external payable {
@@ -15,6 +18,7 @@ contract WDEL is ERC20, IWETH9 {
 
     function deposit() public payable override {
         _mint(msg.sender, msg.value);
+        emit Deposit(msg.sender, msg.value);
     }
 
     function mint(address to, uint256 amount) public {
@@ -25,6 +29,7 @@ contract WDEL is ERC20, IWETH9 {
     function withdraw(uint256 amount) public override {
         require(balanceOf(msg.sender) >= amount, "WDEL: insufficient balance");
         _burn(msg.sender, amount);
+        emit Withdrawal(msg.sender, amount);
         (bool success, ) = msg.sender.call{value: amount}("");
         require(success, "WDEL: DEL transfer failed");
     }
