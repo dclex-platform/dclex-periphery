@@ -6,6 +6,7 @@ import {
     SafeERC20
 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {DclexPool} from "dclex-protocol/src/DclexPool.sol";
 import {IDclexSwapCallback} from "dclex-protocol/src/IDclexSwapCallback.sol";
 import {
@@ -18,7 +19,7 @@ import {
 /// @title DclexRouter
 /// @notice Unified router for dual-DEX: DCLEX oracle pools (CUSTOM) + Uniswap V3 AMM pools
 /// @dev wDEL (wrapped DEL) is treated as a normal AMM token — wrapping/unwrapping is frontend responsibility
-contract DclexRouter is Ownable, IDclexSwapCallback {
+contract DclexRouter is Ownable, ReentrancyGuard, IDclexSwapCallback {
     using SafeERC20 for IERC20;
 
     error DclexRouter__InputTooHigh();
@@ -64,11 +65,16 @@ contract DclexRouter is Ownable, IDclexSwapCallback {
     event CustomPoolSet(address indexed token, address pool);
     event AMMPoolSet(address indexed token, address v3Pool);
 
+    error DclexRouter__ZeroAddress();
+
     constructor(
         ISwapRouter _v3SwapRouter,
         IQuoter _v3Quoter,
         IERC20 _usdc
     ) Ownable(msg.sender) {
+        if (address(_v3SwapRouter) == address(0)) revert DclexRouter__ZeroAddress();
+        if (address(_v3Quoter) == address(0)) revert DclexRouter__ZeroAddress();
+        if (address(_usdc) == address(0)) revert DclexRouter__ZeroAddress();
         v3SwapRouter = _v3SwapRouter;
         v3Quoter = _v3Quoter;
         usdc = _usdc;
@@ -105,6 +111,11 @@ contract DclexRouter is Ownable, IDclexSwapCallback {
             emit CustomPoolSet(token, address(0));
             emit PoolSetForToken(token, address(0), PoolType.NONE);
         } else {
+            // Clear old pool mapping if replacing
+            DclexPool oldPool = stockToCustomPool[token];
+            if (address(oldPool) != address(0)) {
+                pools[address(oldPool)] = false;
+            }
             pools[address(pool)] = true;
             stockPoolType[token] = PoolType.CUSTOM;
             stockToCustomPool[token] = pool;
@@ -113,6 +124,8 @@ contract DclexRouter is Ownable, IDclexSwapCallback {
             emit PoolSetForToken(token, address(pool), PoolType.CUSTOM);
         }
     }
+
+    error DclexRouter__InvalidFeeTier();
 
     function setAMMPool(
         address token,
@@ -127,6 +140,9 @@ contract DclexRouter is Ownable, IDclexSwapCallback {
             emit AMMPoolSet(token, address(0));
             emit PoolSetForToken(token, address(0), PoolType.NONE);
         } else {
+            if (feeTier != 500 && feeTier != 3000 && feeTier != 10000) {
+                revert DclexRouter__InvalidFeeTier();
+            }
             stockPoolType[token] = PoolType.AMM;
             stockToAMMPool[token] = v3Pool;
             stockToFeeTier[token] = feeTier;
@@ -225,7 +241,7 @@ contract DclexRouter is Ownable, IDclexSwapCallback {
         uint256 maxInputAmount,
         uint256 deadline,
         bytes[] calldata pythUpdateData
-    ) external payable checkDeadline(deadline) {
+    ) external payable nonReentrant checkDeadline(deadline) {
         uint256 inputAmount;
         PoolType poolType = stockPoolType[token];
 
@@ -268,7 +284,7 @@ contract DclexRouter is Ownable, IDclexSwapCallback {
         uint256 maxInputAmount,
         uint256 deadline,
         bytes[] calldata pythUpdateData
-    ) external payable checkDeadline(deadline) {
+    ) external payable nonReentrant checkDeadline(deadline) {
         uint256 inputAmount;
         PoolType poolType = stockPoolType[token];
 
@@ -314,7 +330,7 @@ contract DclexRouter is Ownable, IDclexSwapCallback {
         uint256 minOutputAmount,
         uint256 deadline,
         bytes[] calldata pythUpdateData
-    ) external payable checkDeadline(deadline) {
+    ) external payable nonReentrant checkDeadline(deadline) {
         uint256 outputAmount;
         PoolType poolType = stockPoolType[token];
 
@@ -352,7 +368,7 @@ contract DclexRouter is Ownable, IDclexSwapCallback {
         uint256 minOutputAmount,
         uint256 deadline,
         bytes[] calldata pythUpdateData
-    ) external payable checkDeadline(deadline) {
+    ) external payable nonReentrant checkDeadline(deadline) {
         uint256 outputAmount;
         PoolType poolType = stockPoolType[token];
 
@@ -394,7 +410,7 @@ contract DclexRouter is Ownable, IDclexSwapCallback {
         uint256 minOutputAmount,
         uint256 deadline,
         bytes[] calldata pythUpdateData
-    ) external payable checkDeadline(deadline) {
+    ) external payable nonReentrant checkDeadline(deadline) {
         uint256 usdcAmount;
         uint256 outputAmount;
 
@@ -468,7 +484,7 @@ contract DclexRouter is Ownable, IDclexSwapCallback {
         uint256 maxInputAmount,
         uint256 deadline,
         bytes[] calldata pythUpdateData
-    ) external payable checkDeadline(deadline) {
+    ) external payable nonReentrant checkDeadline(deadline) {
         PoolType outputType = stockPoolType[outputToken];
         if (outputType == PoolType.CUSTOM) {
             bytes memory callbackData = _encodeSwapCallback(
@@ -535,6 +551,8 @@ contract DclexRouter is Ownable, IDclexSwapCallback {
                     recipient: address(this),
                     deadline: block.timestamp,
                     amountIn: amount,
+                    // TODO: Add intermediate slippage protection via Quoter
+                    // Currently 0 = vulnerable to sandwich on intermediate hop
                     amountOutMinimum: 0,
                     sqrtPriceLimitX96: 0
                 })
@@ -556,6 +574,7 @@ contract DclexRouter is Ownable, IDclexSwapCallback {
                     recipient: recipient,
                     deadline: block.timestamp,
                     amountIn: usdcAmount,
+                    // TODO: Add intermediate slippage protection via Quoter
                     amountOutMinimum: 0,
                     sqrtPriceLimitX96: 0
                 })
