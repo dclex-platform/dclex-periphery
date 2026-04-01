@@ -14,7 +14,9 @@ import {
     HelperConfig as DclexProtocolHelperConfig
 } from "dclex-protocol/script/HelperConfig.s.sol";
 import {IDID} from "dclex-blockchain/contracts/interfaces/IDID.sol";
+import {DigitalIdentity} from "dclex-blockchain/contracts/dclex/DigitalIdentity.sol";
 import {USDCMock} from "dclex-blockchain/contracts/mocks/USDCMock.sol";
+import {BatchPoolInitializer} from "src/BatchPoolInitializer.sol";
 
 interface IDclexRouter {
     function stockTokenToPool(address token) external view returns (address);
@@ -332,15 +334,13 @@ contract InitializeAllPools is Script {
 
     /// @notice Initializes all pools on local Anvil (chainId 31337).
     ///         Uses MockPyth for price data and dynamically reads stocks from Factory.
+    ///         Optimized to use BatchPoolInitializer for single-transaction deployment.
     function runLocal(
         address factoryAddress,
         address routerAddress,
         address mockPythAddress
     ) external {
         Factory factory = Factory(factoryAddress);
-        IDclexRouter router = IDclexRouter(routerAddress);
-        DclexProtocolHelperConfig helperConfig = new DclexProtocolHelperConfig();
-
         uint256 stocksCount = factory.getStocksCount();
         console.log("Initializing liquidity for", stocksCount, "pools");
 
@@ -349,98 +349,76 @@ contract InitializeAllPools is Script {
             return;
         }
 
-        // Ensure caller has a DID (needed to transfer stock tokens)
-        IDID digitalIdentity = IDID(address(factory.getDID()));
-        vm.startBroadcast();
-        if (digitalIdentity.balanceOf(msg.sender) == 0) {
-            digitalIdentity.mintAdmin(msg.sender, 2, bytes32(0));
-            console.log("Minted DID for caller");
-        }
-        vm.stopBroadcast();
+        // Collect symbols and price feed IDs using helper
+        (string[] memory symbols, bytes32[] memory priceFeedIds) = _collectStockData(factory, stocksCount);
 
-        // Initialize each pool
-        for (uint256 i = 0; i < stocksCount; i++) {
-            _initializeLocalPool(
-                factory,
-                router,
-                helperConfig,
-                mockPythAddress,
-                factory.symbols(i)
-            );
-        }
+        // Calculate ETH needed for Pyth fees
+        uint256 totalFee = _calculateTotalFee(mockPythAddress, stocksCount);
+
+        console.log("Deploying BatchPoolInitializer for", stocksCount, "pools");
+
+        // Execute batch initialization
+        _executeBatchInit(factory, routerAddress, mockPythAddress, symbols, priceFeedIds, totalFee);
 
         console.log("Pool liquidity initialization complete!");
     }
 
-    function _initializeLocalPool(
-        Factory factory,
-        IDclexRouter router,
-        DclexProtocolHelperConfig helperConfig,
-        address mockPythAddress,
-        string memory symbol
-    ) internal {
-        address stockAddress = factory.stocks(symbol);
-        if (stockAddress == address(0)) {
-            console.log("Stock not found:", symbol);
-            return;
+    function _collectStockData(Factory factory, uint256 stocksCount)
+        private
+        returns (string[] memory symbols, bytes32[] memory priceFeedIds)
+    {
+        DclexProtocolHelperConfig helperConfig = new DclexProtocolHelperConfig();
+        symbols = new string[](stocksCount);
+        priceFeedIds = new bytes32[](stocksCount);
+
+        for (uint256 i = 0; i < stocksCount; i++) {
+            symbols[i] = factory.symbols(i);
+            priceFeedIds[i] = helperConfig.getPriceFeedId(symbols[i]);
         }
+    }
 
-        address poolAddress = router.stockTokenToPool(stockAddress);
-        if (poolAddress == address(0)) {
-            console.log("Pool not found for:", symbol);
-            return;
-        }
-
-        // Check if pool is already initialized
-        if (IERC20(stockAddress).balanceOf(poolAddress) > 0) {
-            console.log("Pool already initialized:", symbol);
-            return;
-        }
-
-        // Get USDC address from the pool itself (pools have their own USDC token set at deployment)
-        DclexPool pool = DclexPool(poolAddress);
-        address usdcAddress = address(pool.usdcToken());
-
-        // Get DigitalIdentity and mint DID for pool if needed
-        IDID digitalIdentity = IDID(address(factory.getDID()));
-        if (digitalIdentity.balanceOf(poolAddress) == 0) {
-            vm.startBroadcast();
-            digitalIdentity.mintAdmin(poolAddress, 2, bytes32(0));
-            vm.stopBroadcast();
-            console.log("Minted DID for pool:", symbol);
-        }
-
-        // Create mock price update data
-        bytes[] memory priceUpdateData = new bytes[](1);
-        priceUpdateData[0] = MockPyth(mockPythAddress)
-            .createPriceFeedUpdateData(
-                helperConfig.getPriceFeedId(symbol),
-                LOCAL_MOCK_PRICE,
-                10, // conf
-                LOCAL_EXPO,
-                LOCAL_MOCK_PRICE, // emaPrice
-                10, // emaConf
-                uint64(block.timestamp),
-                uint64(block.timestamp)
-            );
-
-        uint256 updateFee = MockPyth(mockPythAddress).getUpdateFee(
-            priceUpdateData
+    function _calculateTotalFee(address mockPythAddress, uint256 stocksCount) private view returns (uint256) {
+        MockPyth mockPyth = MockPyth(mockPythAddress);
+        bytes[] memory sampleData = new bytes[](1);
+        sampleData[0] = mockPyth.createPriceFeedUpdateData(
+            bytes32(0), LOCAL_MOCK_PRICE, 10, LOCAL_EXPO,
+            LOCAL_MOCK_PRICE, 10, uint64(block.timestamp), uint64(block.timestamp)
         );
+        return mockPyth.getUpdateFee(sampleData) * stocksCount;
+    }
+
+    function _executeBatchInit(
+        Factory factory,
+        address routerAddress,
+        address mockPythAddress,
+        string[] memory symbols,
+        bytes32[] memory priceFeedIds,
+        uint256 totalFee
+    ) private {
+        DigitalIdentity digitalIdentity = DigitalIdentity(address(factory.getDID()));
+        bytes32 adminRole = digitalIdentity.DEFAULT_ADMIN_ROLE();
 
         vm.startBroadcast();
-        // Mint USDC for this pool (using pool's USDC token)
-        USDCMock(usdcAddress).mint(msg.sender, LOCAL_USDC_AMOUNT);
-        factory.forceMintStocks(symbol, msg.sender, LOCAL_STOCK_AMOUNT);
-        IERC20(stockAddress).approve(poolAddress, LOCAL_STOCK_AMOUNT);
-        IERC20(usdcAddress).approve(poolAddress, LOCAL_USDC_AMOUNT);
-        pool.initialize{value: updateFee}(
-            LOCAL_STOCK_AMOUNT,
-            LOCAL_USDC_AMOUNT,
-            priceUpdateData
-        );
-        vm.stopBroadcast();
 
-        console.log("Initialized pool for", symbol, "at", poolAddress);
+        BatchPoolInitializer batchInit = new BatchPoolInitializer();
+
+        // Grant temporary admin roles
+        digitalIdentity.grantRole(adminRole, address(batchInit));
+        factory.grantRole(adminRole, address(batchInit));
+
+        // Initialize all pools
+        batchInit.initializeAllPools{value: totalFee}(
+            factory,
+            routerAddress,
+            mockPythAddress,
+            symbols,
+            priceFeedIds
+        );
+
+        // Revoke admin roles
+        digitalIdentity.revokeRole(adminRole, address(batchInit));
+        factory.revokeRole(adminRole, address(batchInit));
+
+        vm.stopBroadcast();
     }
 }
