@@ -11,11 +11,7 @@ import {
     NonfungiblePositionManager
 } from "@uniswap/v3-periphery/contracts/NonfungiblePositionManager.sol";
 import {WDEL} from "../src/WDEL.sol";
-import {
-    IWETH9
-} from "@uniswap/v3-periphery/contracts/interfaces/external/IWETH9.sol";
-
-/// @title DeployV3Infrastructure
+/// @title DeployV3ForLocal
 /// @notice Deploys full V3 infrastructure: WDEL, Factory, SwapRouter, Quoter, NonfungiblePositionManager
 contract DeployV3ForLocal is Script {
     function run()
