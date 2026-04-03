@@ -1,5 +1,5 @@
 # Default profile — compiles everything.
-# via_ir = false prevents MCOPY opcode generation (Shanghai-safe bytecode).
+# via_ir = true enables the IR pipeline, required for complex scripts with many local variables
 [profile.default]
 src = "src"
 out = "out"

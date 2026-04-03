@@ -13,6 +13,7 @@ import {
     DigitalIdentity
 } from "dclex-blockchain/contracts/dclex/DigitalIdentity.sol";
 import {DclexRouter} from "src/DclexRouter.sol";
+import {BatchPoolDeployer} from "src/BatchPoolDeployer.sol";
 import {HelperConfig as DclexPeripheryHelperConfig} from "./HelperConfig.s.sol";
 import {ISwapRouter} from "@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
 import {IQuoter} from "@uniswap/v3-periphery/contracts/interfaces/IQuoter.sol";
@@ -100,43 +101,59 @@ contract DeployRouterWithPools is Script {
         _finalizeDeployment(result.router, ctx.stocksFactory, result.config.admin);
     }
 
-    function _deployPools(
-        DclexRouter dclexRouter,
+    /// @notice Deploy router and all pools via batch contract
+    /// @dev Uses temporary permission delegation to enable single-transaction deployment
+    function _deployRouterAndPoolsViaBatchContract(
         Factory stocksFactory,
         DclexProtocolHelperConfig dclexProtocolHelperConfig,
-        uint256 maxPriceStaleness
-    ) private {
-        DeployDclexPool dclexPoolDeployer = new DeployDclexPool();
+        uint256 maxPriceStaleness,
+        ISwapRouter swapRouter,
+        IWETH9 wethToken,
+        IERC20 usdcToken,
+        address admin
+    ) private returns (DclexRouter) {
+        DclexProtocolHelperConfig.NetworkConfig memory protocolConfig = dclexProtocolHelperConfig.getConfig();
         DigitalIdentity digitalIdentity = DigitalIdentity(address(stocksFactory.getDID()));
+
+        // Collect stock addresses and price feed IDs
         uint256 symbolsCount = stocksFactory.getStocksCount();
+        address[] memory stockAddresses = new address[](symbolsCount);
+        bytes32[] memory priceFeedIds = new bytes32[](symbolsCount);
 
         for (uint256 i = 0; i < symbolsCount; ++i) {
             string memory symbol = stocksFactory.symbols(i);
-            address stockAddress = stocksFactory.stocks(symbol);
-            DclexPool dclexPool = dclexPoolDeployer.run(
-                IStock(stockAddress),
-                dclexProtocolHelperConfig,
-                maxPriceStaleness
-            );
-            vm.startBroadcast();
-            dclexRouter.setPool(stockAddress, dclexPool);
-            digitalIdentity.mintAdmin(address(dclexPool), 2, bytes32(0));
-            vm.stopBroadcast();
+            stockAddresses[i] = stocksFactory.stocks(symbol);
+            priceFeedIds[i] = dclexProtocolHelperConfig.getPriceFeedId(symbol);
         }
-    }
 
-    function _finalizeDeployment(
-        DclexRouter dclexRouter,
-        Factory stocksFactory,
-        address admin
-    ) private {
         vm.startBroadcast();
-        // Router needs a DID because it acts as intermediary for dUSD
-        // in stock-to-stock swaps (receives from pool A, sends to pool B)
-        DigitalIdentity digitalIdentity = DigitalIdentity(address(stocksFactory.getDID()));
-        digitalIdentity.mintAdmin(address(dclexRouter), 2, bytes32(0));
-        dclexRouter.transferOwnership(admin);
+
+        // Deploy router and batch deployer
+        DclexRouter router = new DclexRouter(swapRouter, wethToken, usdcToken);
+        BatchPoolDeployer batchDeployer = new BatchPoolDeployer();
+
+        // Grant temporary permissions to batch deployer
+        router.transferOwnership(address(batchDeployer));
+        digitalIdentity.grantRole(digitalIdentity.DEFAULT_ADMIN_ROLE(), address(batchDeployer));
+
+        // Deploy all pools in a single transaction
+        batchDeployer.deployAllPools(
+            router,
+            stocksFactory,
+            protocolConfig.usdcToken,
+            protocolConfig.oracle,
+            stockAddresses,
+            priceFeedIds,
+            maxPriceStaleness,
+            admin
+        );
+
+        // Revoke batch deployer's admin role (router ownership already transferred in deployAllPools)
+        digitalIdentity.revokeRole(digitalIdentity.DEFAULT_ADMIN_ROLE(), address(batchDeployer));
+
         vm.stopBroadcast();
+
+        return router;
     }
 
     /// @notice Simplified deployment without external V3 params
