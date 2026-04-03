@@ -27,9 +27,6 @@ import {SwapRouter} from "@uniswap/v3-periphery/contracts/SwapRouter.sol";
 import {
     ISwapRouter
 } from "@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
-import {
-    IWETH9
-} from "@uniswap/v3-periphery/contracts/interfaces/external/IWETH9.sol";
 import {WDEL} from "../src/WDEL.sol";
 
 /// @title DeployAMMStocks
@@ -46,7 +43,7 @@ contract DeployAMMStocks is Script {
     IUniswapV3Factory internal _v3Factory;
     V3LiquidityHelper internal _liquidityHelper;
     DigitalIdentity internal _did;
-    IWETH9 internal _weth;
+    address internal _weth;
 
     struct DeploymentResult {
         address[] stockAddresses;
@@ -91,13 +88,9 @@ contract DeployAMMStocks is Script {
 
         // Check if V3 infrastructure exists via router
         ISwapRouter existingRouter = _router.v3SwapRouter();
-        IWETH9 existingWeth = _router.weth();
 
         address swapRouterAddr;
-        if (
-            address(existingRouter) == address(0) ||
-            address(existingWeth) == address(0)
-        ) {
+        if (address(existingRouter) == address(0)) {
             console.log("V3 infrastructure not found, deploying...");
             (_v3Factory, swapRouterAddr) = _deployV3Infrastructure();
         } else {
@@ -106,12 +99,14 @@ contract DeployAMMStocks is Script {
                 address(existingRouter)
             );
             swapRouterAddr = address(existingRouter);
-            _weth = existingWeth;
             // Use the SAME factory that the SwapRouter uses (critical for routing to work)
             _v3Factory = IUniswapV3Factory(
                 SwapRouter(payable(swapRouterAddr)).factory()
             );
             console.log("Using existing V3 Factory:", address(_v3Factory));
+            // Get wDEL address from SwapRouter's WETH9
+            _weth = SwapRouter(payable(swapRouterAddr)).WETH9();
+            console.log("Using existing wDEL:", _weth);
         }
 
         // Deploy liquidity helper contract
@@ -145,13 +140,13 @@ contract DeployAMMStocks is Script {
             0 // Not used for single-side
         );
 
-        // Stock 2: AMMT2 at $20 with 100,000 stocks single-side liquidity
+        // Stock 2: AMMT2 at $20 — pool created but NO initial liquidity (for testing)
         (result.stockAddresses[1], result.v3PoolAddresses[1]) = _deployAMMStock(
             "AMM Test Stock 2",
             "AMMT2",
             20e6, // $20
-            100_000e18, // 100K stocks liquidity (single-side)
-            0 // Not used for single-side
+            0, // No liquidity — empty pool for testing add liquidity from UI
+            0
         );
 
         // Deploy wDEL/dUSD pool - separate broadcast to isolate potential failures
@@ -168,7 +163,7 @@ contract DeployAMMStocks is Script {
 
     /// @notice Deploy wDEL/dUSD pool with full-range liquidity at lowest tick
     function _deployWdelPool() private returns (address poolAddr) {
-        if (address(_weth) == address(0)) {
+        if (_weth == address(0)) {
             console.log("WETH/wDEL not available, skipping wDEL pool");
             return address(0);
         }
@@ -176,12 +171,12 @@ contract DeployAMMStocks is Script {
         console.log("Deploying wDEL/dUSD pool...");
 
         // Create pool for wDEL/dUSD
-        address token0 = address(_weth) < address(_usdc)
-            ? address(_weth)
+        address token0 = _weth < address(_usdc)
+            ? _weth
             : address(_usdc);
-        address token1 = address(_weth) < address(_usdc)
+        address token1 = _weth < address(_usdc)
             ? address(_usdc)
-            : address(_weth);
+            : _weth;
 
         vm.startBroadcast();
 
@@ -198,7 +193,7 @@ contract DeployAMMStocks is Script {
 
         if (sqrtPriceX96 == 0) {
             // Initialize wDEL at $0.01 (1e4 in 6 decimals)
-            uint160 initSqrtPriceX96 = _calcSqrtPrice(address(_weth), 1e4);
+            uint160 initSqrtPriceX96 = _calcSqrtPrice(_weth, 1e4);
             pool.initialize(initSqrtPriceX96);
             console.log("Initialized wDEL/dUSD pool at $0.01");
             console.log("  sqrtPriceX96:", uint256(initSqrtPriceX96));
@@ -211,8 +206,8 @@ contract DeployAMMStocks is Script {
         }
 
         // Mint DID for wDEL token itself (needed for transfers)
-        if (_did.balanceOf(address(_weth)) == 0) {
-            _did.mintAdmin(address(_weth), 0, bytes32(0));
+        if (_did.balanceOf(_weth) == 0) {
+            _did.mintAdmin(_weth, 0, bytes32(0));
             console.log("Minted DID for wDEL token");
         }
 
@@ -221,7 +216,7 @@ contract DeployAMMStocks is Script {
         // Register wDEL with router as AMM pool so it appears in allStockTokens()
         // Do this BEFORE liquidity so even if liquidity fails, wDEL is registered
         vm.startBroadcast();
-        _router.setAMMPool(address(_weth), poolAddr, 3000);
+        _router.setAMMPool(_weth, poolAddr, 3000);
         console.log("Registered wDEL with router as AMM pool");
         vm.stopBroadcast();
 
@@ -241,7 +236,7 @@ contract DeployAMMStocks is Script {
         vm.startBroadcast();
 
         // Mint wDEL to helper (use mint for testing)
-        WDEL(payable(address(_weth))).mint(
+        WDEL(payable(_weth)).mint(
             address(_liquidityHelper),
             wdelAmount
         );
@@ -254,7 +249,7 @@ contract DeployAMMStocks is Script {
         vm.stopBroadcast();
 
         // Add two-sided liquidity
-        _addTwoSidedLiquidity(poolAddr, address(_weth));
+        _addTwoSidedLiquidity(poolAddr, _weth);
     }
 
     /// @notice Add single-side liquidity (only one token, below current price)
@@ -361,16 +356,16 @@ contract DeployAMMStocks is Script {
         vm.startBroadcast();
 
         // Deploy WETH9 mock (wDEL on Primelta chain)
-        WDEL weth = new WDEL();
-        console.log("WDEL (wDEL) deployed at:", address(weth));
-        _weth = IWETH9(address(weth));
+        WDEL wethToken = new WDEL();
+        console.log("WDEL (wDEL) deployed at:", address(wethToken));
+        _weth = address(wethToken);
 
         // Deploy V3 Factory
         UniswapV3Factory factory = new UniswapV3Factory();
         console.log("UniswapV3Factory deployed at:", address(factory));
 
         // Deploy SwapRouter
-        SwapRouter swapRouter = new SwapRouter(address(factory), address(weth));
+        SwapRouter swapRouter = new SwapRouter(address(factory), address(wethToken));
         console.log("SwapRouter deployed at:", address(swapRouter));
 
         vm.stopBroadcast();
