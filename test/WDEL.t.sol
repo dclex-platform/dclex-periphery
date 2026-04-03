@@ -105,4 +105,83 @@ contract WDELTest is Test {
         assertEq(wdel.balanceOf(user), 0);
         vm.stopPrank();
     }
+
+    // --- depositAndApprove tests ---
+
+    function test_DepositAndApprove() public {
+        address spender = makeAddr("spender");
+        vm.prank(user);
+        wdel.depositAndApprove{value: 5 ether}(spender);
+
+        assertEq(wdel.balanceOf(user), 5 ether);
+        assertEq(wdel.allowance(user, spender), type(uint256).max);
+        assertEq(address(wdel).balance, 5 ether);
+    }
+
+    function test_DepositAndApproveEmitsEvent() public {
+        address spender = makeAddr("spender");
+        vm.expectEmit(true, false, false, true);
+        emit Deposit(user, 3 ether);
+        vm.prank(user);
+        wdel.depositAndApprove{value: 3 ether}(spender);
+    }
+
+    function test_DepositAndApproveZeroAmount() public {
+        address spender = makeAddr("spender");
+        vm.prank(user);
+        wdel.depositAndApprove{value: 0}(spender);
+
+        assertEq(wdel.balanceOf(user), 0);
+        assertEq(wdel.allowance(user, spender), type(uint256).max);
+    }
+
+    function test_DepositAndApproveMultipleCalls() public {
+        address spender = makeAddr("spender");
+        vm.startPrank(user);
+        wdel.depositAndApprove{value: 2 ether}(spender);
+        wdel.depositAndApprove{value: 3 ether}(spender);
+        vm.stopPrank();
+
+        assertEq(wdel.balanceOf(user), 5 ether);
+        assertEq(wdel.allowance(user, spender), type(uint256).max);
+    }
+
+    function test_DepositAndApproveSpenderCanTransfer() public {
+        address spender = makeAddr("spender");
+        address recipient = makeAddr("recipient");
+
+        vm.prank(user);
+        wdel.depositAndApprove{value: 10 ether}(spender);
+
+        // Spender can transferFrom immediately — no separate approve tx needed
+        vm.prank(spender);
+        wdel.transferFrom(user, recipient, 4 ether);
+
+        assertEq(wdel.balanceOf(recipient), 4 ether);
+        assertEq(wdel.balanceOf(user), 6 ether);
+    }
+
+    function test_DepositAndApproveDifferentSpenders() public {
+        address spender1 = makeAddr("spender1");
+        address spender2 = makeAddr("spender2");
+
+        vm.startPrank(user);
+        wdel.depositAndApprove{value: 5 ether}(spender1);
+        wdel.depositAndApprove{value: 5 ether}(spender2);
+        vm.stopPrank();
+
+        assertEq(wdel.balanceOf(user), 10 ether);
+        assertEq(wdel.allowance(user, spender1), type(uint256).max);
+        assertEq(wdel.allowance(user, spender2), type(uint256).max);
+    }
+
+    function testFuzz_DepositAndApprove(uint96 amount) public {
+        address spender = makeAddr("spender");
+        vm.deal(user, uint256(amount));
+        vm.prank(user);
+        wdel.depositAndApprove{value: amount}(spender);
+
+        assertEq(wdel.balanceOf(user), amount);
+        assertEq(wdel.allowance(user, spender), type(uint256).max);
+    }
 }

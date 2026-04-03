@@ -26,6 +26,14 @@ contract WDEL is ERC20, IWETH9 {
         _mint(to, amount);
     }
 
+    /// @notice Wrap native DEL and approve spender in a single transaction
+    /// @param spender Address to approve for spending the wrapped tokens
+    function depositAndApprove(address spender) public payable {
+        _mint(msg.sender, msg.value);
+        _approve(msg.sender, spender, type(uint256).max);
+        emit Deposit(msg.sender, msg.value);
+    }
+
     function withdraw(uint256 amount) public override {
         require(balanceOf(msg.sender) >= amount, "WDEL: insufficient balance");
         _burn(msg.sender, amount);
