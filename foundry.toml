@@ -21,6 +21,9 @@ remappings = [
     "base64-sol/=lib/base64/",
 ]
 
+# SeedLiquidity requires via_ir due to stack depth — skip in default profile
+skip = ["script/SeedLiquidity.s.sol"]
+
 # Pool deployment — skips DclexRouter and router-related scripts.
 [profile.pool-deploy]
 src = "src"

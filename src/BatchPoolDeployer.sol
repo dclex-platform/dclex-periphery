@@ -13,57 +13,39 @@ import {IPriceOracle} from "dclex-protocol/src/IPriceOracle.sol";
 /// @notice Deploys all DclexPools in a single transaction
 /// @dev Requires temporary ownership of router and DEFAULT_ADMIN_ROLE on DigitalIdentity
 contract BatchPoolDeployer {
-    /// @notice Deploy pools for all stocks and register them with router
-    /// @dev Caller must transfer router ownership to this contract first,
-    ///      and grant DEFAULT_ADMIN_ROLE on DigitalIdentity to this contract.
-    ///      After calling, ownership is transferred to finalOwner.
-    /// @param router The DclexRouter to register pools with (must be owned by this contract)
-    /// @param factory The Factory contract (for DID access)
-    /// @param usdcToken The USDC token for pools
-    /// @param oracle The price oracle for pools
-    /// @param stockAddresses Array of stock token addresses
-    /// @param priceFeedIds Array of Pyth price feed IDs (same order as stocks)
-    /// @param maxPriceStaleness Max price staleness in seconds
-    /// @param finalOwner Address to receive router ownership after deployment
-    function deployAllPools(
-        DclexRouter router,
-        Factory factory,
-        IERC20 usdcToken,
-        IPriceOracle oracle,
-        address[] calldata stockAddresses,
-        bytes32[] calldata priceFeedIds,
-        uint256 maxPriceStaleness,
-        address finalOwner
-    ) external {
-        require(stockAddresses.length == priceFeedIds.length, "Length mismatch");
+    struct DeployParams {
+        DclexRouter router;
+        Factory factory;
+        IERC20 usdcToken;
+        IPriceOracle oracle;
+        address[] stockAddresses;
+        bytes32[] priceFeedIds;
+        uint256 maxPriceStaleness;
+        address finalOwner;
+    }
 
-        DigitalIdentity digitalIdentity = DigitalIdentity(address(factory.getDID()));
+    function deployAllPools(DeployParams calldata params) external {
+        require(params.stockAddresses.length == params.priceFeedIds.length, "Length mismatch");
 
-        // Mint DID for router
-        digitalIdentity.mintAdmin(address(router), 2, bytes32(0));
+        DigitalIdentity digitalIdentity = DigitalIdentity(address(params.factory.getDID()));
+        digitalIdentity.mintAdmin(address(params.router), 2, bytes32(0));
 
-        for (uint256 i = 0; i < stockAddresses.length; i++) {
-            address stockAddress = stockAddresses[i];
-            if (stockAddress == address(0)) continue;
+        for (uint256 i = 0; i < params.stockAddresses.length; i++) {
+            if (params.stockAddresses[i] == address(0)) continue;
 
-            // Deploy pool with finalOwner as admin
             DclexPool pool = new DclexPool(
-                IStock(stockAddress),
-                usdcToken,
-                oracle,
-                priceFeedIds[i],
-                finalOwner,
-                maxPriceStaleness
+                IStock(params.stockAddresses[i]),
+                params.usdcToken,
+                params.oracle,
+                params.priceFeedIds[i],
+                params.finalOwner,
+                params.maxPriceStaleness
             );
 
-            // Register with router (we have ownership)
-            router.setPool(stockAddress, pool);
-
-            // Mint DID for pool
+            params.router.setPool(params.stockAddresses[i], pool);
             digitalIdentity.mintAdmin(address(pool), 2, bytes32(0));
         }
 
-        // Transfer router ownership to final owner
-        router.transferOwnership(finalOwner);
+        params.router.transferOwnership(params.finalOwner);
     }
 }

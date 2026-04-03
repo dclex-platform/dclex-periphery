@@ -3,7 +3,6 @@ pragma solidity ^0.8.26;
 
 import {Script} from "forge-std/Script.sol";
 import {IStock} from "dclex-blockchain/contracts/interfaces/IStock.sol";
-import {DeployDclexPool} from "dclex-protocol/script/DeployDclexPool.s.sol";
 import {DclexPool} from "dclex-protocol/src/DclexPool.sol";
 import {
     HelperConfig as DclexProtocolHelperConfig
@@ -86,74 +85,83 @@ contract DeployRouterWithPools is Script {
             ? ctx.v3SwapRouter
             : result.config.v3SwapRouter;
 
-        // Deploy router
-        vm.startBroadcast();
         IQuoter quoter = address(ctx.v3Quoter) != address(0)
             ? ctx.v3Quoter
             : result.config.v3Quoter;
-        result.router = new DclexRouter(swapRouter, quoter, result.config.usdcToken);
-        vm.stopBroadcast();
 
-        // Deploy pools
-        _deployPools(result.router, ctx.stocksFactory, result.protocolHelperConfig, ctx.maxPriceStaleness);
-
-        // Setup DID and transfer ownership
-        _finalizeDeployment(result.router, ctx.stocksFactory, result.config.admin);
+        // Deploy router + all pools via batch contract (single tx for all pools)
+        result.router = _deployRouterAndPoolsViaBatchContract(
+            ctx.stocksFactory,
+            result.protocolHelperConfig,
+            ctx.maxPriceStaleness,
+            swapRouter,
+            quoter,
+            result.config.usdcToken,
+            result.config.admin
+        );
     }
 
-    /// @notice Deploy router and all pools via batch contract
+    /// @notice Deploy router and all pools via batch contract (single tx for all pools)
     /// @dev Uses temporary permission delegation to enable single-transaction deployment
+    struct BatchDeployParams {
+        Factory stocksFactory;
+        DclexProtocolHelperConfig protocolHelperConfig;
+        uint256 maxPriceStaleness;
+        ISwapRouter swapRouter;
+        IQuoter quoter;
+        IERC20 usdcToken;
+        address admin;
+    }
+
     function _deployRouterAndPoolsViaBatchContract(
         Factory stocksFactory,
-        DclexProtocolHelperConfig dclexProtocolHelperConfig,
+        DclexProtocolHelperConfig protocolHelperConfig,
         uint256 maxPriceStaleness,
         ISwapRouter swapRouter,
-        IWETH9 wethToken,
+        IQuoter quoter,
         IERC20 usdcToken,
         address admin
     ) private returns (DclexRouter) {
-        DclexProtocolHelperConfig.NetworkConfig memory protocolConfig = dclexProtocolHelperConfig.getConfig();
-        DigitalIdentity digitalIdentity = DigitalIdentity(address(stocksFactory.getDID()));
+        return _executeBatchDeploy(BatchDeployParams(
+            stocksFactory, protocolHelperConfig, maxPriceStaleness,
+            swapRouter, quoter, usdcToken, admin
+        ));
+    }
 
-        // Collect stock addresses and price feed IDs
-        uint256 symbolsCount = stocksFactory.getStocksCount();
-        address[] memory stockAddresses = new address[](symbolsCount);
-        bytes32[] memory priceFeedIds = new bytes32[](symbolsCount);
-
-        for (uint256 i = 0; i < symbolsCount; ++i) {
-            string memory symbol = stocksFactory.symbols(i);
-            stockAddresses[i] = stocksFactory.stocks(symbol);
-            priceFeedIds[i] = dclexProtocolHelperConfig.getPriceFeedId(symbol);
-        }
+    function _executeBatchDeploy(BatchDeployParams memory p) private returns (DclexRouter) {
+        DclexProtocolHelperConfig.NetworkConfig memory cfg = p.protocolHelperConfig.getConfig();
+        (address[] memory stocks, bytes32[] memory feeds) = _collectStockData(p.stocksFactory, p.protocolHelperConfig);
 
         vm.startBroadcast();
 
-        // Deploy router and batch deployer
-        DclexRouter router = new DclexRouter(swapRouter, wethToken, usdcToken);
-        BatchPoolDeployer batchDeployer = new BatchPoolDeployer();
+        DclexRouter router = new DclexRouter(p.swapRouter, p.quoter, p.usdcToken);
+        BatchPoolDeployer batch = new BatchPoolDeployer();
+        DigitalIdentity did = DigitalIdentity(address(p.stocksFactory.getDID()));
 
-        // Grant temporary permissions to batch deployer
-        router.transferOwnership(address(batchDeployer));
-        digitalIdentity.grantRole(digitalIdentity.DEFAULT_ADMIN_ROLE(), address(batchDeployer));
-
-        // Deploy all pools in a single transaction
-        batchDeployer.deployAllPools(
-            router,
-            stocksFactory,
-            protocolConfig.usdcToken,
-            protocolConfig.oracle,
-            stockAddresses,
-            priceFeedIds,
-            maxPriceStaleness,
-            admin
-        );
-
-        // Revoke batch deployer's admin role (router ownership already transferred in deployAllPools)
-        digitalIdentity.revokeRole(digitalIdentity.DEFAULT_ADMIN_ROLE(), address(batchDeployer));
+        router.transferOwnership(address(batch));
+        did.grantRole(did.DEFAULT_ADMIN_ROLE(), address(batch));
+        batch.deployAllPools(BatchPoolDeployer.DeployParams(
+            router, p.stocksFactory, cfg.usdcToken, cfg.oracle,
+            stocks, feeds, p.maxPriceStaleness, p.admin
+        ));
+        did.revokeRole(did.DEFAULT_ADMIN_ROLE(), address(batch));
 
         vm.stopBroadcast();
-
         return router;
+    }
+
+    function _collectStockData(
+        Factory stocksFactory,
+        DclexProtocolHelperConfig helperConfig
+    ) private returns (address[] memory stocks, bytes32[] memory feeds) {
+        uint256 n = stocksFactory.getStocksCount();
+        stocks = new address[](n);
+        feeds = new bytes32[](n);
+        for (uint256 i = 0; i < n; ++i) {
+            string memory sym = stocksFactory.symbols(i);
+            stocks[i] = stocksFactory.stocks(sym);
+            feeds[i] = helperConfig.getPriceFeedId(sym);
+        }
     }
 
     /// @notice Simplified deployment without external V3 params
