@@ -140,13 +140,13 @@ contract DeployAMMStocks is Script {
             0 // Not used for single-side
         );
 
-        // Stock 2: AMMT2 at $20 with 100,000 stocks single-side liquidity
+        // Stock 2: AMMT2 at $20 — pool created but NO initial liquidity (for testing)
         (result.stockAddresses[1], result.v3PoolAddresses[1]) = _deployAMMStock(
             "AMM Test Stock 2",
             "AMMT2",
             20e6, // $20
-            100_000e18, // 100K stocks liquidity (single-side)
-            0 // Not used for single-side
+            0, // No liquidity — empty pool for testing add liquidity from UI
+            0
         );
 
         // Deploy wDEL/dUSD pool - separate broadcast to isolate potential failures

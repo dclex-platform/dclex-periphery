@@ -30,10 +30,10 @@ interface IDclexRouter {
 ///         Pool value ~= 10 * 100 + 1000 = 2000 USD each side
 contract InitializeAllPools is Script {
     address payable constant DCLEX_ROUTER =
-        payable(0x1FFbb4cF957630830A624Aca3f811FBB69d5A027);
-    address constant FACTORY = 0x5d360D437c9bEd63B149435b11f5c5c5d41bb549;
-    address constant DUSD = 0x951c4871D16d953a3Fd64c17a756B1aA95D63E58;
-    address constant FI_ORACLE = 0x3fedb4Ebc078968Cd9735ab67141986D587300a4;
+        payable(0xA320857d6369Aa2d9458E345202FDd96df790E23);
+    address constant FACTORY = 0xbB90800100cD0983898599faA395E5be14701698;
+    address constant DUSD = 0x65d698b248248dE624F6D90C2796BF1273F69317;
+    address constant FI_ORACLE = 0xa6772Cdd87ab9c5A7cfFb5b7Af0a366e0682D776;
 
     // Mock prices: all stocks @ $100
     // For $100: price = 10000000000 (1e10), expo = -8 → 1e10 * 1e-8 = 100
@@ -299,6 +299,12 @@ contract InitializeAllPools is Script {
 
             DclexPool pool = DclexPool(poolAddress);
             IERC20 stockTok = IERC20(stockAddress);
+
+            // Skip already initialized pools
+            if (stockTok.balanceOf(poolAddress) > 0) {
+                console.log("Skipping already initialized pool for", symbol);
+                continue;
+            }
 
             // Build FIOracle-compatible signed price data (admin is temp trusted signer)
             bytes[] memory priceData = new bytes[](1);
