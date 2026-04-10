@@ -266,7 +266,7 @@ contract DeployMissingPools is Script {
             dclexRouter.setPool(stockAddress, address(dclexPool));
             digitalIdentity.mintAdmin(address(dclexPool), 2, bytes32(0));
             // Apply default fee curve so platform fee is always set after deploy
-            dclexPool.setFeeCurve(0.03 ether, 0.001 ether);
+            dclexPool.setFeeCurve(0.01 ether, 0.001 ether);
             vm.stopBroadcast();
 
             console.log("Deployed pool for", symbol, "at", address(dclexPool));

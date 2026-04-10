@@ -16,7 +16,7 @@ import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol"
 contract BatchPoolDeployer {
     /// @notice Default base fee rate applied to every newly-deployed pool (3%)
     /// @dev When the pool is perfectly balanced the effective fee equals this value
-    uint256 public constant DEFAULT_BASE_FEE_RATE = 0.03 ether;
+    uint256 public constant DEFAULT_BASE_FEE_RATE = 0.01 ether;
     /// @notice Default sensitivity parameter (0.1%) controlling how fast the fee rises
     /// with pool imbalance. feeCurveA = sensitivity / 4, feeCurveB = baseFeeRate - sensitivity.
     uint256 public constant DEFAULT_SENSITIVITY = 0.001 ether;
