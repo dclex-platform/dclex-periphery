@@ -227,6 +227,12 @@ contract DeployAMMStocks is Script {
 
     /// @notice Add two-sided liquidity to wDEL/dUSD pool
     function _addWdelLiquidity(address poolAddr) private {
+        // WDEL.mint is chainId==31337 only. Skip liquidity on other chains;
+        // the pool is still created + initialized + registered, just empty.
+        if (block.chainid != 31337) {
+            console.log("Skipping wDEL liquidity on non-local chain; pool is empty.");
+            return;
+        }
         // Use configurable wDEL amount (set via runLocalWithConfig or default 5K)
         uint256 wdelAmount = _wdelLiquidityAmount;
         // Calculate USDC needed at $0.01 per wDEL (cheap initial price)
