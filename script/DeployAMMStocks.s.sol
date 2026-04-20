@@ -431,9 +431,9 @@ contract DeployAMMStocks is Script {
         );
         console.log("Minted stocks to liquidity helper:", stockLiquidity);
 
-        // Mint USDC to helper (using mock's mint function)
-        IERC20Mintable(address(_usdc)).mint(address(_liquidityHelper), usdcNeeded);
-        console.log("Minted USDC to liquidity helper:", usdcNeeded);
+        // Mint dUSD to helper via Factory (canonical path — Stablecoin has no open mint)
+        _factory.forceMintStablecoin("dUSD", address(_liquidityHelper), usdcNeeded);
+        console.log("Minted dUSD to liquidity helper:", usdcNeeded);
 
         // 5. Register with router as AMM pool
         _router.setAMMPool(stockAddr, poolAddr, 3000);
