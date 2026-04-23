@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Build
+        run: forge build
+
+      # Explicit hash guard step so the log leads with it on failure: if this
+      # step fails, POOL_INIT_CODE_HASH disagrees with the currently-compiled
+      # UniswapV3Pool bytecode and every SwapRouter/Quoter/NonfungiblePositionManager
+      # pool lookup will revert with 0x at runtime. Fix before merge.
+      - name: POOL_INIT_CODE_HASH guard
+        run: forge test --match-path test/PoolInitCodeHash.t.sol -vv
+
+      - name: Full test suite
+        run: forge test
