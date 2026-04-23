@@ -35,9 +35,19 @@ contract DeployV3Production is Script {
 
         vm.startBroadcast(adminKey);
 
-        WDEL wdel = new WDEL();
-        result.wdel = address(wdel);
-        console.log("WDEL:", result.wdel);
+        // Reuse existing WDEL when redeploying V3 infra — users have balances
+        // there, losing them to a fresh contract would be disruptive. Falls
+        // back to creating a new one when WDEL_ADDRESS is not set (first-time
+        // deploy).
+        address existingWdel = vm.envOr("WDEL_ADDRESS", address(0));
+        if (existingWdel != address(0)) {
+            result.wdel = existingWdel;
+            console.log("WDEL (reused):", result.wdel);
+        } else {
+            WDEL wdel = new WDEL();
+            result.wdel = address(wdel);
+            console.log("WDEL (new):", result.wdel);
+        }
 
         DclexV3Factory v3Factory = new DclexV3Factory();
         result.v3Factory = address(v3Factory);

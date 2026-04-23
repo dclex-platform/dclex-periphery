@@ -1,12 +1,17 @@
-# Default profile — compiles everything.
-# via_ir = true enables the IR pipeline, required for complex scripts with many local variables
+# Default profile — compiles everything with the IR pipeline.
+# via_ir MUST stay true across all profiles: UniswapV3Pool bytecode (and therefore
+# `PoolAddress.POOL_INIT_CODE_HASH`) depends on the pipeline, and every deploy
+# command in this repo passes --via-ir. A local `forge build` or `forge test`
+# without IR would produce a non-IR `out/UniswapV3Pool.sol/*.json` artifact
+# whose hash silently disagrees with what the factory actually deploys —
+# `test/PoolInitCodeHash.t.sol` would then false-alarm (or worse, false-pass).
 [profile.default]
 src = "src"
 out = "out"
 libs = ["lib"]
 libraries = ["lib/pyth-crosschain/target_chains/ethereum/sdk/solidity/PythUtils.sol:PythUtils:0x6039565f9ff755754e9c52b6dfe4ab7ba6db2957"]
 evm_version = "shanghai"
-via_ir = false
+via_ir = true
 optimizer_runs = 200
 fs_permissions = [{ access = "read", path = "./pythPriceFeedIds.json"}]
 remappings = [
@@ -31,7 +36,7 @@ out = "out"
 libs = ["lib"]
 libraries = ["lib/pyth-crosschain/target_chains/ethereum/sdk/solidity/PythUtils.sol:PythUtils:0x6039565f9ff755754e9c52b6dfe4ab7ba6db2957"]
 evm_version = "shanghai"
-via_ir = false
+via_ir = true
 optimizer_runs = 200
 fs_permissions = [{ access = "read", path = "./pythPriceFeedIds.json"}]
 remappings = [
@@ -61,7 +66,7 @@ out = "out"
 libs = ["lib"]
 libraries = ["lib/pyth-crosschain/target_chains/ethereum/sdk/solidity/PythUtils.sol:PythUtils:0x6039565f9ff755754e9c52b6dfe4ab7ba6db2957"]
 evm_version = "shanghai"
-via_ir = false
+via_ir = true
 optimizer_runs = 200
 fs_permissions = [{ access = "read", path = "./pythPriceFeedIds.json"}]
 remappings = [

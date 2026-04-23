@@ -29,11 +29,13 @@ interface IDclexRouter {
 ///         dusdAmount:  1000 dUSD (6 decimals) = 1000e6
 ///         Pool value ~= 10 * 100 + 1000 = 2000 USD each side
 contract InitializeAllPools is Script {
-    address payable constant DCLEX_ROUTER =
-        payable(0xA320857d6369Aa2d9458E345202FDd96df790E23);
-    address constant FACTORY = 0xbB90800100cD0983898599faA395E5be14701698;
-    address constant DUSD = 0x65d698b248248dE624F6D90C2796BF1273F69317;
-    address constant FI_ORACLE = 0xa6772Cdd87ab9c5A7cfFb5b7Af0a366e0682D776;
+    // Addresses are env-driven so this script can be reused across redeploys.
+    // Set: DCLEX_ROUTER, FACTORY, DUSD, FI_ORACLE in the env before running.
+    address payable DCLEX_ROUTER;
+    address FACTORY;
+    address DUSD;
+    address FI_ORACLE;
+    uint256 constant PROTOCOL_FEE_RATE = 0.15 ether; // 15%
 
     // Mock prices: all stocks @ $100
     // For $100: price = 10000000000 (1e10), expo = -8 → 1e10 * 1e-8 = 100
@@ -256,6 +258,11 @@ contract InitializeAllPools is Script {
     }
 
     function run() external {
+        DCLEX_ROUTER = payable(vm.envAddress("DCLEX_ROUTER"));
+        FACTORY = vm.envAddress("FACTORY");
+        DUSD = vm.envAddress("DUSD");
+        FI_ORACLE = vm.envAddress("FI_ORACLE");
+
         IDclexRouter router = IDclexRouter(DCLEX_ROUTER);
         Factory factory = Factory(FACTORY);
         IERC20 dusdToken = IERC20(DUSD);
@@ -324,9 +331,11 @@ contract InitializeAllPools is Script {
             dusdToken.approve(poolAddress, DUSD_AMOUNT);
             // Initialize pool (no ETH needed — FIOracle fee is 0)
             pool.initialize(STOCK_AMOUNT, DUSD_AMOUNT, priceData);
+            // Set protocol fee rate (admin has DEFAULT_ADMIN_ROLE on pool)
+            pool.setProtocolFeeRate(PROTOCOL_FEE_RATE);
             vm.stopBroadcast();
 
-            console.log("Initialized pool for", symbol, "at", poolAddress);
+            console.log("Initialized + fee-set pool for", symbol, "at", poolAddress);
         }
 
         // Restore backend signer
