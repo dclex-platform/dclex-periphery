@@ -4,6 +4,7 @@ pragma solidity ^0.8.26;
 import {Script, console} from "forge-std/Script.sol";
 import {SwapRouter} from "@uniswap/v3-periphery/contracts/SwapRouter.sol";
 import {Quoter} from "@uniswap/v3-periphery/contracts/lens/Quoter.sol";
+import {TickLens} from "@uniswap/v3-periphery/contracts/lens/TickLens.sol";
 import {WDEL} from "../src/WDEL.sol";
 import {DclexV3Factory} from "../src/DclexV3Factory.sol";
 import {DclexPositionManager} from "../src/DclexPositionManager.sol";
@@ -20,15 +21,13 @@ contract DeployV3Production is Script {
         address swapRouter;
         address quoter;
         address positionManager;
+        address tickLens;
     }
 
     /// @notice Deploy V3 infrastructure only (no DclexRouter — that's in DeployDclexRouterWithPools)
     /// @param did DigitalIdentity contract address (for DclexPositionManager DID gating)
     function run(address did) external returns (V3Contracts memory result) {
-        uint256 adminKey = vm.envOr("ADMIN_PRIVATE_KEY", uint256(0));
-        if (adminKey == 0) {
-            adminKey = 0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d;
-        }
+        uint256 adminKey = vm.envUint("ADMIN_PRIVATE_KEY");
 
         console.log("\n=== Deploying V3 Infrastructure ===");
         console.log("DID:", did);
@@ -59,6 +58,13 @@ contract DeployV3Production is Script {
         );
         result.positionManager = address(npm);
         console.log("DclexPositionManager:", result.positionManager);
+
+        // Stateless lens used by the DEX add-liquidity histogram. No
+        // constructor args, no DID gating, factory-agnostic — one deploy
+        // per chain serves every present and future V3 pool.
+        TickLens tickLens = new TickLens();
+        result.tickLens = address(tickLens);
+        console.log("TickLens:", result.tickLens);
 
         vm.stopBroadcast();
 
