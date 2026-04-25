@@ -4,6 +4,7 @@ pragma solidity ^0.8.26;
 import {Script, console} from "forge-std/Script.sol";
 import {SwapRouter} from "@uniswap/v3-periphery/contracts/SwapRouter.sol";
 import {Quoter} from "@uniswap/v3-periphery/contracts/lens/Quoter.sol";
+import {TickLens} from "@uniswap/v3-periphery/contracts/lens/TickLens.sol";
 import {WDEL} from "../src/WDEL.sol";
 import {DclexV3Factory} from "../src/DclexV3Factory.sol";
 import {DclexPositionManager} from "../src/DclexPositionManager.sol";
@@ -20,6 +21,7 @@ contract DeployV3Production is Script {
         address swapRouter;
         address quoter;
         address positionManager;
+        address tickLens;
     }
 
     /// @notice Deploy V3 infrastructure only (no DclexRouter — that's in DeployDclexRouterWithPools)
@@ -59,6 +61,13 @@ contract DeployV3Production is Script {
         );
         result.positionManager = address(npm);
         console.log("DclexPositionManager:", result.positionManager);
+
+        // Stateless lens used by the DEX add-liquidity histogram. No
+        // constructor args, no DID gating, factory-agnostic — one deploy
+        // per chain serves every present and future V3 pool.
+        TickLens tickLens = new TickLens();
+        result.tickLens = address(tickLens);
+        console.log("TickLens:", result.tickLens);
 
         vm.stopBroadcast();
 
