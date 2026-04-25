@@ -11,10 +11,7 @@ import {TickLens} from "@uniswap/v3-periphery/contracts/lens/TickLens.sol";
 ///         every present and future UniswapV3Pool created via DclexV3Factory.
 contract DeployTickLens is Script {
     function run() external returns (address tickLens) {
-        uint256 adminKey = vm.envOr("ADMIN_PRIVATE_KEY", uint256(0));
-        if (adminKey == 0) {
-            adminKey = 0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d;
-        }
+        uint256 adminKey = vm.envUint("ADMIN_PRIVATE_KEY");
 
         vm.startBroadcast(adminKey);
         TickLens lens = new TickLens();
