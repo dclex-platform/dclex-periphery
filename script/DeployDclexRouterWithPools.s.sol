@@ -96,7 +96,7 @@ contract DeployRouterWithPools is Script {
             ctx.maxPriceStaleness,
             swapRouter,
             quoter,
-            result.config.usdcToken,
+            result.config.dusdToken,
             result.config.admin
         );
     }

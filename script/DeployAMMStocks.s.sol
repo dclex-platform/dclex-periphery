@@ -248,9 +248,8 @@ contract DeployAMMStocks is Script {
         );
         console.log("Sent wDEL to liquidity helper:", wdelAmount);
 
-        // Mint USDC to helper
-        IERC20Mintable(address(_usdc)).mint(address(_liquidityHelper), usdcAmount);
-        console.log("Sent USDC to liquidity helper:", usdcAmount);
+        _factory.forceMintStablecoin("dUSD", address(_liquidityHelper), usdcAmount);
+        console.log("Sent dUSD to liquidity helper:", usdcAmount);
 
         vm.stopBroadcast();
 
@@ -431,9 +430,8 @@ contract DeployAMMStocks is Script {
         );
         console.log("Minted stocks to liquidity helper:", stockLiquidity);
 
-        // Mint USDC to helper (using mock's mint function)
-        IERC20Mintable(address(_usdc)).mint(address(_liquidityHelper), usdcNeeded);
-        console.log("Minted USDC to liquidity helper:", usdcNeeded);
+        _factory.forceMintStablecoin("dUSD", address(_liquidityHelper), usdcNeeded);
+        console.log("Minted dUSD to liquidity helper:", usdcNeeded);
 
         // 5. Register with router as AMM pool
         _router.setAMMPool(stockAddr, poolAddr, 3000);
@@ -592,9 +590,4 @@ contract DeployAMMStocks is Script {
             return uint160((1e9 << 96) / sqrtUsdc);
         }
     }
-}
-
-/// @notice Interface for mintable tokens (USDCMock)
-interface IERC20Mintable {
-    function mint(address to, uint256 amount) external;
 }
