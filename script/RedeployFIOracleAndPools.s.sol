@@ -12,7 +12,11 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
 interface IUnifiedRouter {
-    function setDclexPool(address token, DclexPool pool) external;
+    function setCustomPool(address token, DclexPool pool) external;
+}
+
+interface IUSDCMock {
+    function mint(address to, uint256 amount) external;
 }
 
 /// @notice One-time redeploy script — replaces the FIOracle and the 44
@@ -28,7 +32,7 @@ interface IUnifiedRouter {
 ///   - Deploys 44 new DclexPools (one per non-AMM stock) using the new
 ///     oracle.
 ///   - Mints DID for each new pool.
-///   - Updates UnifiedRouter.setDclexPool(stock, newPool) for each.
+///   - Updates UnifiedRouter.setCustomPool(stock, newPool) for each.
 ///   - Mints stocks + dUSD to admin (Factory.forceMint{Stocks,Stablecoin}).
 ///   - Initializes each pool with two-sided liquidity (admin acts as
 ///     temporary FIOracle trusted signer to sign price data, then signer
@@ -161,7 +165,7 @@ contract RedeployFIOracleAndPools is Script {
 
         vm.startBroadcast(adminKey);
         did.mintAdmin(address(pool), 2, bytes32(0));
-        router.setDclexPool(stockAddress, pool);
+        router.setCustomPool(stockAddress, pool);
         vm.stopBroadcast();
 
         return address(pool);
@@ -228,11 +232,7 @@ contract RedeployFIOracleAndPools is Script {
         vm.stopBroadcast();
 
         vm.startBroadcast(adminKey);
-        Factory(FACTORY).forceMintStablecoin(
-            "dUSD",
-            vm.addr(adminKey),
-            DUSD_AMOUNT * allStocks.length
-        );
+        IUSDCMock(DUSD).mint(vm.addr(adminKey), DUSD_AMOUNT * allStocks.length);
         vm.stopBroadcast();
 
         for (uint256 i = 0; i < allStocks.length; i++) {
