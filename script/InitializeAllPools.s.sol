@@ -17,9 +17,11 @@ import {IDID} from "dclex-blockchain/contracts/interfaces/IDID.sol";
 import {DigitalIdentity} from "dclex-blockchain/contracts/dclex/DigitalIdentity.sol";
 import {USDCMock} from "dclex-blockchain/contracts/mocks/USDCMock.sol";
 import {BatchPoolInitializer} from "src/BatchPoolInitializer.sol";
+import {FIOraclePoolBatchInitializer} from "src/FIOraclePoolBatchInitializer.sol";
 
 interface IDclexRouter {
     function stockTokenToPool(address token) external view returns (address);
+    function stockToCustomPool(address token) external view returns (address);
 }
 
 /// @notice Mints stock + dUSD, then initializes all 44 pools on chain 2028.
@@ -29,11 +31,8 @@ interface IDclexRouter {
 ///         dusdAmount:  1000 dUSD (6 decimals) = 1000e6
 ///         Pool value ~= 10 * 100 + 1000 = 2000 USD each side
 contract InitializeAllPools is Script {
-    address payable constant DCLEX_ROUTER =
-        payable(0xA320857d6369Aa2d9458E345202FDd96df790E23);
-    address constant FACTORY = 0xbB90800100cD0983898599faA395E5be14701698;
-    address constant DUSD = 0x65d698b248248dE624F6D90C2796BF1273F69317;
-    address constant FI_ORACLE = 0xa6772Cdd87ab9c5A7cfFb5b7Af0a366e0682D776;
+    string internal constant DUSD_SYMBOL = "dUSD";
+    uint256 internal constant INITIAL_UPDATE_FEE = 0.001 ether;
 
     // Mock prices: all stocks @ $100
     // For $100: price = 10000000000 (1e10), expo = -8 → 1e10 * 1e-8 = 100
@@ -255,87 +254,168 @@ contract InitializeAllPools is Script {
         return abi.encodePacked(feedId, price, expo, publishTime, v, r, s);
     }
 
+    struct InitCtx {
+        Factory factory;
+        IDclexRouter router;
+        FIOracle fiOracle;
+        IERC20 dusdToken;
+        address backendSigner;
+        uint256 adminKey;
+        uint256 masterAdminKey;
+    }
+
+    /// @notice Initialize all canonical DclexPools on a target chain.
+    ///         Required env: ADMIN_PRIVATE_KEY, MASTER_ADMIN_PRIVATE_KEY,
+    ///         DCLEX_ROUTER, DCLEX_FACTORY, DCLEX_FIORACLE,
+    ///         DCLEX_BACKEND_SIGNER.
+    ///         Optional env: DCLEX_DUSD_SYMBOL ("dUSD"),
+    ///         DCLEX_BATCH_INIT (skip setup if set; runs init only — used
+    ///         for the second-pass run when publishTime drift matters).
+    ///
+    /// Two-pass usage on slow chains (publishTime ages between
+    /// `vm.unixTime()` and when the actual tx mines):
+    ///   1. Run without DCLEX_BATCH_INIT — deploys batchInit, grants
+    ///      roles, funds it with dUSD, exits before init. Logs the
+    ///      batchInit address.
+    ///   2. Re-run with DCLEX_BATCH_INIT=<addr> — does sign + initializeAll
+    ///      in a single tx so publishTime is at most ~10s old at mining.
+    ///      Cleans up roles after.
     function run() external {
-        IDclexRouter router = IDclexRouter(DCLEX_ROUTER);
-        Factory factory = Factory(FACTORY);
-        IERC20 dusdToken = IERC20(DUSD);
-        FIOracle fiOracle = FIOracle(FI_ORACLE);
+        InitCtx memory ctx = _loadCtx();
 
-        uint256 adminKey = vm.envUint("ADMIN_PRIVATE_KEY");
-        address admin = vm.addr(adminKey);
+        (address[] memory pendingPools, string[] memory pendingSymbols, bytes32[] memory pendingFeeds, uint256 pendingCount)
+            = _collectPending(ctx.factory, ctx.router, getAllStocks());
 
-        // Temporarily set admin as FIOracle trusted signer (admin has the role)
-        vm.startBroadcast(adminKey);
-        fiOracle.setTrustedSigner(admin);
+        if (pendingCount == 0) {
+            console.log("Nothing to initialize.");
+            return;
+        }
+        console.log("Pools to initialize:", pendingCount);
+
+        address existing = vm.envOr("DCLEX_BATCH_INIT", address(0));
+        if (existing == address(0)) {
+            FIOraclePoolBatchInitializer batchInit = _setupBatchInit(ctx, pendingCount);
+            console.log("Setup done. Re-run with DCLEX_BATCH_INIT=", address(batchInit));
+            return;
+        }
+        FIOraclePoolBatchInitializer batchInit = FIOraclePoolBatchInitializer(payable(existing));
+        _runBatchInit(ctx, batchInit, pendingPools, pendingSymbols, pendingFeeds, pendingCount);
+        // Teardown is a separate script run (cleanup_init_roles or
+        // manual cast send) so this run has only ONE broadcast — keeps
+        // publishTime ~10s old at mining (under the 60s staleness window).
+        console.log("Initialized", pendingCount, "pools. Run cleanup separately.");
+    }
+
+    function _loadCtx() internal view returns (InitCtx memory ctx) {
+        ctx.factory = Factory(vm.envAddress("DCLEX_FACTORY"));
+        ctx.router = IDclexRouter(vm.envAddress("DCLEX_ROUTER"));
+        ctx.fiOracle = FIOracle(vm.envAddress("DCLEX_FIORACLE"));
+        ctx.backendSigner = vm.envAddress("DCLEX_BACKEND_SIGNER");
+        ctx.adminKey = vm.envUint("ADMIN_PRIVATE_KEY");
+        ctx.masterAdminKey = vm.envUint("MASTER_ADMIN_PRIVATE_KEY");
+        ctx.dusdToken = IERC20(ctx.factory.stablecoins(DUSD_SYMBOL));
+        require(address(ctx.dusdToken) != address(0), "dUSD not registered on Factory");
+    }
+
+    function _setupBatchInit(InitCtx memory ctx, uint256 pendingCount)
+        internal
+        returns (FIOraclePoolBatchInitializer batchInit)
+    {
+        // Admin temporarily takes the trustedSigner role so the script
+        // can sign mock price data with adminKey.
+        vm.startBroadcast(ctx.adminKey);
+        ctx.fiOracle.setTrustedSigner(vm.addr(ctx.adminKey));
+        batchInit = new FIOraclePoolBatchInitializer();
+        DigitalIdentity(address(ctx.factory.getDID())).mintAdmin(address(batchInit), 2, bytes32(0));
+        ctx.factory.forceMintStablecoin(DUSD_SYMBOL, address(batchInit), DUSD_AMOUNT * pendingCount);
         vm.stopBroadcast();
-        console.log("FIOracle: temporarily set admin as trusted signer");
 
-        StockInfo[] memory allStocks = getAllStocks();
+        // Granting DEFAULT_ADMIN_ROLE on Factory requires MASTER_ADMIN_ROLE.
+        vm.startBroadcast(ctx.masterAdminKey);
+        ctx.factory.grantRole(0x00, address(batchInit));
+        vm.stopBroadcast();
+    }
 
-        // Mint dUSD for all pools in one shot via Factory (admin has DEFAULT_ADMIN_ROLE)
-        vm.startBroadcast(adminKey);
-        factory.forceMintStablecoin(
-            "dUSD",
-            admin,
-            DUSD_AMOUNT * allStocks.length
+    function _runBatchInit(
+        InitCtx memory ctx,
+        FIOraclePoolBatchInitializer batchInit,
+        address[] memory pendingPools,
+        string[] memory pendingSymbols,
+        bytes32[] memory pendingFeeds,
+        uint256 pendingCount
+    ) internal {
+        // Forge forks the chain at some past block, so sim block.timestamp
+        // lags wall clock by ~30-60s. Sync sim to wall clock so the
+        // FuturePublishTime check (publishTime <= block.timestamp) passes
+        // in sim AND publishTime is recent enough that the real chain
+        // (block.timestamp ≈ wall clock at mining) won't trip StalePrice.
+        uint64 publishTime = uint64(vm.unixTime() / 1000);
+        vm.warp(publishTime);
+        vm.startBroadcast(ctx.adminKey);
+        bytes[] memory priceUpdateData = new bytes[](pendingCount);
+        for (uint256 i = 0; i < pendingCount; i++) {
+            priceUpdateData[i] = signedPriceData(
+                ctx.adminKey, pendingFeeds[i], MOCK_PRICE, EXPO, publishTime
+            );
+        }
+        batchInit.initializeAll{value: INITIAL_UPDATE_FEE * pendingCount}(
+            FIOraclePoolBatchInitializer.InitParams({
+                factory: ctx.factory,
+                dusdToken: ctx.dusdToken,
+                pools: pendingPools,
+                stockSymbols: pendingSymbols,
+                priceUpdateData: priceUpdateData,
+                stockAmount: STOCK_AMOUNT,
+                dusdAmount: DUSD_AMOUNT,
+                feePerPool: INITIAL_UPDATE_FEE
+            })
         );
         vm.stopBroadcast();
+    }
 
-        for (uint256 i = 0; i < allStocks.length; i++) {
-            string memory symbol = allStocks[i].symbol;
-            bytes32 feedId = allStocks[i].priceFeedId;
-
-            address stockAddress = factory.stocks(symbol);
-            require(
-                stockAddress != address(0),
-                string.concat("Stock not found: ", symbol)
-            );
-
-            address poolAddress = router.stockTokenToPool(stockAddress);
-            require(
-                poolAddress != address(0),
-                string.concat("Pool not found: ", symbol)
-            );
-
-            DclexPool pool = DclexPool(poolAddress);
-            IERC20 stockTok = IERC20(stockAddress);
-
-            // Skip already initialized pools
-            if (stockTok.balanceOf(poolAddress) > 0) {
-                console.log("Skipping already initialized pool for", symbol);
-                continue;
-            }
-
-            // Build FIOracle-compatible signed price data (admin is temp trusted signer)
-            bytes[] memory priceData = new bytes[](1);
-            priceData[0] = signedPriceData(
-                adminKey,
-                feedId,
-                MOCK_PRICE,
-                EXPO,
-                uint64(block.timestamp)
-            );
-
-            vm.startBroadcast(adminKey);
-            // Mint stock tokens via factory
-            factory.forceMintStocks(symbol, admin, STOCK_AMOUNT);
-            // Approve pool to spend stock + dUSD
-            stockTok.approve(poolAddress, STOCK_AMOUNT);
-            dusdToken.approve(poolAddress, DUSD_AMOUNT);
-            // Initialize pool (no ETH needed — FIOracle fee is 0)
-            pool.initialize(STOCK_AMOUNT, DUSD_AMOUNT, priceData);
-            vm.stopBroadcast();
-
-            console.log("Initialized pool for", symbol, "at", poolAddress);
-        }
-
-        // Restore backend signer
-        vm.startBroadcast(adminKey);
-        fiOracle.setTrustedSigner(0x971b5a2872ec17EeDDED9fc4dd691D8B33B97031);
+    function _teardown(InitCtx memory ctx, FIOraclePoolBatchInitializer batchInit) internal {
+        vm.startBroadcast(ctx.masterAdminKey);
+        ctx.factory.revokeRole(0x00, address(batchInit));
         vm.stopBroadcast();
-        console.log("FIOracle: restored backend as trusted signer");
 
-        console.log("All 44 pools initialized with dUSD.");
+        vm.startBroadcast(ctx.adminKey);
+        ctx.fiOracle.setTrustedSigner(ctx.backendSigner);
+        vm.stopBroadcast();
+    }
+
+    function _collectPending(
+        Factory factory,
+        IDclexRouter router,
+        StockInfo[] memory allStocks
+    ) internal view returns (
+        address[] memory pools,
+        string[] memory symbols,
+        bytes32[] memory feeds,
+        uint256 count
+    ) {
+        address[] memory tmpPools = new address[](allStocks.length);
+        string[] memory tmpSymbols = new string[](allStocks.length);
+        bytes32[] memory tmpFeeds = new bytes32[](allStocks.length);
+        for (uint256 i = 0; i < allStocks.length; i++) {
+            address stockAddr = factory.stocks(allStocks[i].symbol);
+            if (stockAddr == address(0)) continue;
+            address poolAddr = router.stockToCustomPool(stockAddr);
+            if (poolAddr == address(0)) continue;
+            // Already initialized? skip.
+            if (IERC20(stockAddr).balanceOf(poolAddr) > 0) continue;
+            tmpPools[count] = poolAddr;
+            tmpSymbols[count] = allStocks[i].symbol;
+            tmpFeeds[count] = allStocks[i].priceFeedId;
+            count++;
+        }
+        pools = new address[](count);
+        symbols = new string[](count);
+        feeds = new bytes32[](count);
+        for (uint256 i = 0; i < count; i++) {
+            pools[i] = tmpPools[i];
+            symbols[i] = tmpSymbols[i];
+            feeds[i] = tmpFeeds[i];
+        }
     }
 
     /// @notice Initializes all pools on local Anvil (chainId 31337).

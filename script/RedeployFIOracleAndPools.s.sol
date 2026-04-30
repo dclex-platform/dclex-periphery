@@ -2,41 +2,24 @@
 pragma solidity ^0.8.26;
 
 import {Script, console} from "forge-std/Script.sol";
-import {IStock} from "dclex-blockchain/contracts/interfaces/IStock.sol";
-import {DigitalIdentity} from "dclex-blockchain/contracts/dclex/DigitalIdentity.sol";
 import {Factory} from "dclex-blockchain/contracts/dclex/Factory.sol";
+import {DigitalIdentity} from "dclex-blockchain/contracts/dclex/DigitalIdentity.sol";
+import {IStock} from "dclex-blockchain/contracts/interfaces/IStock.sol";
 import {DclexPool} from "dclex-protocol/src/DclexPool.sol";
 import {IPriceOracle} from "dclex-protocol/src/IPriceOracle.sol";
 import {FIOracle} from "dclex-protocol/src/FIOracle.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {DclexRouter} from "src/DclexRouter.sol";
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
-interface IUnifiedRouter {
-    function setCustomPool(address token, DclexPool pool) external;
-}
-
-/// @notice Redeploy script — replaces the FIOracle and the canonical
-/// DclexPools on a target chain to pick up the per-call FIOracle fee +
-/// mutable DclexPool oracle changes (dclex-protocol#7). Core (Factory /
-/// DID / Vault / dUSD / V3 Router / V3 pools) stays put.
-///
-/// Address inputs come from env vars so the same script can target any
-/// chain (primelta-dev, staging, etc.). Stock addresses are resolved
-/// dynamically via `factory.stocks(symbol)`. The dUSD seeded into each
-/// pool is minted via `Factory.forceMintStablecoin("dUSD", …)` — no
-/// USDCMock fallback.
+/// @notice Redeploy FIOracle + canonical DclexPools on a target chain.
+/// Address inputs come from env vars so the same script targets any
+/// chain (primelta-dev, staging, etc.). Stock addresses resolved
+/// dynamically via `Factory.stocks(symbol)`.
 ///
 /// Required env: DEPLOYER_PRIVATE_KEY, ADMIN_PRIVATE_KEY,
 /// DCLEX_ROUTER, DCLEX_FACTORY, DCLEX_DID, DCLEX_ADMIN, DCLEX_BACKEND_SIGNER.
 /// Optional env: DCLEX_DUSD_SYMBOL (defaults to "dUSD").
-///
-/// Usage:
-///   FOUNDRY_PROFILE=pool-deploy \
-///     DEPLOYER_PRIVATE_KEY=… ADMIN_PRIVATE_KEY=… \
-///     DCLEX_ROUTER=0x… DCLEX_FACTORY=0x… DCLEX_DID=0x… \
-///     DCLEX_ADMIN=0x… DCLEX_BACKEND_SIGNER=0x… \
-///   forge script dclex-periphery/script/RedeployFIOracleAndPools.s.sol \
-///     --rpc-url $RPC --broadcast
 contract RedeployFIOracleAndPools is Script {
     address payable internal DCLEX_ROUTER;
     address internal FACTORY;
@@ -45,9 +28,8 @@ contract RedeployFIOracleAndPools is Script {
     address internal BACKEND_SIGNER;
     string  internal DUSD_SYMBOL;
 
-    // ── Pool config ─────────────────────────────────────────────────────
-    uint256 constant MAX_PRICE_STALENESS = 86400;        // 1 day for dev
-    uint256 constant INITIAL_UPDATE_FEE  = 0.001 ether;  // per-call FIOracle fee
+    uint256 constant MAX_PRICE_STALENESS = 60;
+    uint256 constant INITIAL_UPDATE_FEE  = 0.001 ether;
     int64   constant MOCK_PRICE          = 10_000_000_000; // $100 with expo -8
     int32   constant EXPO                = -8;
     uint256 constant STOCK_AMOUNT        = 10e18;
@@ -115,81 +97,8 @@ contract RedeployFIOracleAndPools is Script {
     ) internal pure returns (bytes memory) {
         bytes32 messageHash = keccak256(abi.encodePacked(feedId, price, expo, publishTime));
         bytes32 ethSignedHash = MessageHashUtils.toEthSignedMessageHash(messageHash);
-        // signer is admin during init; we sign with adminKey from env.
-        // forge cheatcode `vm.sign` lives on Test, so we call it via Script's vm.
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(signerKey, ethSignedHash);
         return abi.encodePacked(feedId, price, expo, publishTime, v, r, s);
-    }
-
-    function _deployOracle(uint256 deployerKey) internal returns (FIOracle) {
-        address deployer = vm.addr(deployerKey);
-        vm.startBroadcast(deployerKey);
-        FIOracle fiOracle = new FIOracle(deployer, deployer);
-        fiOracle.setPricePerUpdate(INITIAL_UPDATE_FEE);
-        vm.stopBroadcast();
-        console.log("New FIOracle:", address(fiOracle));
-        console.log("  updateFee (wei):", INITIAL_UPDATE_FEE);
-        return fiOracle;
-    }
-
-    function _deployAndRegisterPool(
-        uint256 deployerKey,
-        uint256 adminKey,
-        StockInfo memory info,
-        IPriceOracle oracle,
-        Factory factory,
-        DigitalIdentity did,
-        IUnifiedRouter router,
-        IERC20 dusdToken
-    ) internal returns (address) {
-        address stockAddress = factory.stocks(info.symbol);
-        require(stockAddress != address(0), string.concat("Stock not found: ", info.symbol));
-
-        vm.startBroadcast(deployerKey);
-        DclexPool pool = new DclexPool(
-            IStock(stockAddress),
-            dusdToken,
-            oracle,
-            info.priceFeedId,
-            ADMIN,
-            MAX_PRICE_STALENESS
-        );
-        vm.stopBroadcast();
-        console.log("Pool", info.symbol, ":", address(pool));
-
-        vm.startBroadcast(adminKey);
-        did.mintAdmin(address(pool), 2, bytes32(0));
-        router.setCustomPool(stockAddress, pool);
-        vm.stopBroadcast();
-
-        return address(pool);
-    }
-
-    function _seedPool(
-        uint256 adminKey,
-        StockInfo memory info,
-        address poolAddr,
-        Factory factory,
-        IERC20 dusdToken
-    ) internal {
-        address stockAddress = factory.stocks(info.symbol);
-        bytes[] memory priceData = new bytes[](1);
-        priceData[0] = _signedPriceData(
-            adminKey,
-            info.priceFeedId,
-            MOCK_PRICE,
-            EXPO,
-            uint64(block.timestamp)
-        );
-
-        vm.startBroadcast(adminKey);
-        factory.forceMintStocks(info.symbol, vm.addr(adminKey), STOCK_AMOUNT);
-        IERC20(stockAddress).approve(poolAddr, STOCK_AMOUNT);
-        dusdToken.approve(poolAddr, DUSD_AMOUNT);
-        DclexPool(poolAddr).initialize{value: INITIAL_UPDATE_FEE}(STOCK_AMOUNT, DUSD_AMOUNT, priceData);
-        vm.stopBroadcast();
-
-        console.log("Initialized", info.symbol);
     }
 
     function _loadEnv() internal {
@@ -205,53 +114,84 @@ contract RedeployFIOracleAndPools is Script {
         _loadEnv();
         uint256 deployerKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
         uint256 adminKey    = vm.envUint("ADMIN_PRIVATE_KEY");
+        address deployer    = vm.addr(deployerKey);
 
-        Factory factory = Factory(FACTORY);
-        IERC20 dusdToken = IERC20(factory.stablecoins(DUSD_SYMBOL));
+        Factory factory     = Factory(FACTORY);
+        DigitalIdentity did = DigitalIdentity(DID);
+        DclexRouter router  = DclexRouter(DCLEX_ROUTER);
+        IERC20 dusdToken    = IERC20(factory.stablecoins(DUSD_SYMBOL));
         require(address(dusdToken) != address(0), "dUSD not registered on Factory");
         console.log("Resolved dUSD:", address(dusdToken));
 
-        FIOracle fiOracle = _deployOracle(deployerKey);
-        IPriceOracle oracle = IPriceOracle(address(fiOracle));
+        StockInfo[] memory stocks = getAllStocks();
 
-        StockInfo[] memory allStocks = getAllStocks();
-        address[] memory newPools    = new address[](allStocks.length);
-
-        for (uint256 i = 0; i < allStocks.length; i++) {
-            newPools[i] = _deployAndRegisterPool(
-                deployerKey,
-                adminKey,
-                allStocks[i],
-                oracle,
-                factory,
-                DigitalIdentity(DID),
-                IUnifiedRouter(DCLEX_ROUTER),
-                dusdToken
-            );
-        }
-
-        // Admin temporarily takes the trustedSigner role so we can sign
-        // price update data locally. Restored to BACKEND_SIGNER below.
+        // Phase 1 (deployer): deploy FIOracle, set fee, set admin as
+        // temporary trustedSigner so the script can sign price updates.
         vm.startBroadcast(deployerKey);
+        FIOracle fiOracle = new FIOracle(deployer, deployer);
+        fiOracle.setPricePerUpdate(INITIAL_UPDATE_FEE);
         fiOracle.setTrustedSigner(vm.addr(adminKey));
         vm.stopBroadcast();
+        console.log("New FIOracle:", address(fiOracle));
 
-        vm.startBroadcast(adminKey);
-        factory.forceMintStablecoin(DUSD_SYMBOL, vm.addr(adminKey), DUSD_AMOUNT * allStocks.length);
+        // Phase 2 (deployer): deploy 44 new DclexPools.
+        address[] memory newPools = new address[](stocks.length);
+        vm.startBroadcast(deployerKey);
+        for (uint256 i = 0; i < stocks.length; i++) {
+            address stockAddr = factory.stocks(stocks[i].symbol);
+            require(stockAddr != address(0), string.concat("stock not found: ", stocks[i].symbol));
+            DclexPool pool = new DclexPool(
+                IStock(stockAddr),
+                dusdToken,
+                IPriceOracle(address(fiOracle)),
+                stocks[i].priceFeedId,
+                ADMIN,
+                MAX_PRICE_STALENESS
+            );
+            newPools[i] = address(pool);
+        }
         vm.stopBroadcast();
 
-        for (uint256 i = 0; i < allStocks.length; i++) {
-            _seedPool(adminKey, allStocks[i], newPools[i], factory, dusdToken);
+        // Phase 3 (admin): mint DID for each new pool, route stock→newPool,
+        // bulk-mint dUSD covering all seed amounts, mint stocks, approve,
+        // initialize each pool with two-sided liquidity.
+        vm.startBroadcast(adminKey);
+        for (uint256 i = 0; i < stocks.length; i++) {
+            did.mintAdmin(newPools[i], 2, bytes32(0));
         }
+        for (uint256 i = 0; i < stocks.length; i++) {
+            address stockAddr = factory.stocks(stocks[i].symbol);
+            router.setCustomPool(stockAddr, DclexPool(newPools[i]));
+        }
+        factory.forceMintStablecoin(DUSD_SYMBOL, vm.addr(adminKey), DUSD_AMOUNT * stocks.length);
+        // Pin block.timestamp once for the whole init loop. Forge's
+        // simulation advances time per call; without warping, by the
+        // 44th initialize the signed publishTime would be > 60s stale
+        // even though on-chain all txs land in the same block window.
+        uint64 publishTime = uint64(block.timestamp);
+        vm.warp(publishTime);
+        for (uint256 i = 0; i < stocks.length; i++) {
+            factory.forceMintStocks(stocks[i].symbol, vm.addr(adminKey), STOCK_AMOUNT);
+            address stockAddr = factory.stocks(stocks[i].symbol);
+            IERC20(stockAddr).approve(newPools[i], STOCK_AMOUNT);
+            dusdToken.approve(newPools[i], DUSD_AMOUNT);
+            vm.warp(publishTime);
+            bytes[] memory priceData = new bytes[](1);
+            priceData[0] = _signedPriceData(
+                adminKey, stocks[i].priceFeedId, MOCK_PRICE, EXPO, publishTime
+            );
+            DclexPool(newPools[i]).initialize{value: INITIAL_UPDATE_FEE}(STOCK_AMOUNT, DUSD_AMOUNT, priceData);
+        }
+        vm.stopBroadcast();
 
+        // Phase 4 (deployer): hand FIOracle over to production roles.
         vm.startBroadcast(deployerKey);
         fiOracle.setTrustedSigner(BACKEND_SIGNER);
-        fiOracle.grantRole(fiOracle.DEFAULT_ADMIN_ROLE(), ADMIN);
+        fiOracle.grantRole(0x00, ADMIN);
         fiOracle.setFeeRecipient(ADMIN);
-        fiOracle.renounceRole(fiOracle.DEFAULT_ADMIN_ROLE(), vm.addr(deployerKey));
+        fiOracle.renounceRole(0x00, deployer);
         vm.stopBroadcast();
 
-        console.log("FIOracle handed over: signer -> backend, admin -> ADMIN, feeRecipient -> ADMIN");
         console.log("Done. New FIOracle + new DclexPools live and seeded.");
     }
 }
