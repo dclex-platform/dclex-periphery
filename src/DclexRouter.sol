@@ -240,7 +240,7 @@ contract DclexRouter is Ownable, ReentrancyGuard, IDclexSwapCallback {
         uint256 exactOutputAmount,
         uint256 maxInputAmount,
         uint256 deadline,
-        bytes[] calldata pythUpdateData
+        bytes[] calldata priceUpdateData
     ) external payable nonReentrant checkDeadline(deadline) {
         uint256 inputAmount;
         PoolType poolType = stockPoolType[token];
@@ -255,7 +255,7 @@ contract DclexRouter is Ownable, ReentrancyGuard, IDclexSwapCallback {
                 abi.encode(
                     DclexSwapCallbackData(msg.sender, false, address(0), 0)
                 ),
-                pythUpdateData
+                priceUpdateData
             );
         } else if (poolType == PoolType.AMM) {
             usdc.safeTransferFrom(msg.sender, address(this), maxInputAmount);
@@ -283,7 +283,7 @@ contract DclexRouter is Ownable, ReentrancyGuard, IDclexSwapCallback {
         uint256 exactOutputAmount,
         uint256 maxInputAmount,
         uint256 deadline,
-        bytes[] calldata pythUpdateData
+        bytes[] calldata priceUpdateData
     ) external payable nonReentrant checkDeadline(deadline) {
         uint256 inputAmount;
         PoolType poolType = stockPoolType[token];
@@ -298,7 +298,7 @@ contract DclexRouter is Ownable, ReentrancyGuard, IDclexSwapCallback {
                 abi.encode(
                     DclexSwapCallbackData(msg.sender, false, address(0), 0)
                 ),
-                pythUpdateData
+                priceUpdateData
             );
         } else if (poolType == PoolType.AMM) {
             IERC20(token).safeTransferFrom(
@@ -329,7 +329,7 @@ contract DclexRouter is Ownable, ReentrancyGuard, IDclexSwapCallback {
         uint256 exactInputAmount,
         uint256 minOutputAmount,
         uint256 deadline,
-        bytes[] calldata pythUpdateData
+        bytes[] calldata priceUpdateData
     ) external payable nonReentrant checkDeadline(deadline) {
         uint256 outputAmount;
         PoolType poolType = stockPoolType[token];
@@ -344,7 +344,7 @@ contract DclexRouter is Ownable, ReentrancyGuard, IDclexSwapCallback {
                 abi.encode(
                     DclexSwapCallbackData(msg.sender, false, address(0), 0)
                 ),
-                pythUpdateData
+                priceUpdateData
             );
         } else if (poolType == PoolType.AMM) {
             usdc.safeTransferFrom(msg.sender, address(this), exactInputAmount);
@@ -367,7 +367,7 @@ contract DclexRouter is Ownable, ReentrancyGuard, IDclexSwapCallback {
         uint256 exactInputAmount,
         uint256 minOutputAmount,
         uint256 deadline,
-        bytes[] calldata pythUpdateData
+        bytes[] calldata priceUpdateData
     ) external payable nonReentrant checkDeadline(deadline) {
         uint256 outputAmount;
         PoolType poolType = stockPoolType[token];
@@ -382,7 +382,7 @@ contract DclexRouter is Ownable, ReentrancyGuard, IDclexSwapCallback {
                 abi.encode(
                     DclexSwapCallbackData(msg.sender, false, address(0), 0)
                 ),
-                pythUpdateData
+                priceUpdateData
             );
         } else if (poolType == PoolType.AMM) {
             IERC20(token).safeTransferFrom(
@@ -409,7 +409,7 @@ contract DclexRouter is Ownable, ReentrancyGuard, IDclexSwapCallback {
         uint256 exactInputAmount,
         uint256 minOutputAmount,
         uint256 deadline,
-        bytes[] calldata pythUpdateData
+        bytes[] calldata priceUpdateData
     ) external payable nonReentrant checkDeadline(deadline) {
         uint256 usdcAmount;
         uint256 outputAmount;
@@ -430,7 +430,7 @@ contract DclexRouter is Ownable, ReentrancyGuard, IDclexSwapCallback {
                 exactInputAmount,
                 address(this),
                 callbackData,
-                pythUpdateData
+                priceUpdateData
             );
         } else if (inputType == PoolType.AMM) {
             IERC20(inputToken).safeTransferFrom(
@@ -483,7 +483,7 @@ contract DclexRouter is Ownable, ReentrancyGuard, IDclexSwapCallback {
         uint256 exactOutputAmount,
         uint256 maxInputAmount,
         uint256 deadline,
-        bytes[] calldata pythUpdateData
+        bytes[] calldata priceUpdateData
     ) external payable nonReentrant checkDeadline(deadline) {
         PoolType outputType = stockPoolType[outputToken];
         if (outputType == PoolType.CUSTOM) {
@@ -500,7 +500,7 @@ contract DclexRouter is Ownable, ReentrancyGuard, IDclexSwapCallback {
                 exactOutputAmount,
                 msg.sender,
                 callbackData,
-                pythUpdateData
+                priceUpdateData
             );
         } else if (outputType == PoolType.AMM) {
             _executeAMMOutputSwap(
@@ -509,7 +509,7 @@ contract DclexRouter is Ownable, ReentrancyGuard, IDclexSwapCallback {
                 exactOutputAmount,
                 maxInputAmount,
                 msg.sender,
-                pythUpdateData
+                priceUpdateData
             );
         } else {
             revert DclexRouter__UnknownToken();
@@ -638,7 +638,7 @@ contract DclexRouter is Ownable, ReentrancyGuard, IDclexSwapCallback {
         uint256 exactOutputAmount,
         uint256 maxInputAmount,
         address payer,
-        bytes[] calldata pythUpdateData
+        bytes[] calldata priceUpdateData
     ) private {
         // Step 1: Quote how much USDC is needed for the V3 exact output
         uint256 usdcNeeded = v3Quoter.quoteExactOutputSingle(
@@ -663,7 +663,7 @@ contract DclexRouter is Ownable, ReentrancyGuard, IDclexSwapCallback {
                 abi.encode(
                     DclexSwapCallbackData(payer, false, address(0), 0)
                 ),
-                pythUpdateData
+                priceUpdateData
             );
         } else if (inputType == PoolType.AMM) {
             IERC20(inputToken).safeTransferFrom(
@@ -701,12 +701,12 @@ contract DclexRouter is Ownable, ReentrancyGuard, IDclexSwapCallback {
 
     function _updatePriceFeeds(
         address token,
-        bytes[] calldata pythUpdateData
+        bytes[] calldata priceUpdateData
     ) private {
         PoolType poolType = stockPoolType[token];
-        if (poolType == PoolType.CUSTOM && pythUpdateData.length > 0) {
+        if (poolType == PoolType.CUSTOM && priceUpdateData.length > 0) {
             stockToCustomPool[token].updatePriceFeeds{value: msg.value}(
-                pythUpdateData
+                priceUpdateData
             );
         }
     }
