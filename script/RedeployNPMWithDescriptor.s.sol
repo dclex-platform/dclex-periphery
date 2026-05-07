@@ -23,6 +23,13 @@ import {IDID} from "dclex-blockchain/contracts/interfaces/IDID.sol";
 ///   * update `VITE_POSITION_MANAGER_CONTRACT` in the DEX workflow
 ///   * update CLAUDE.md / deployment manifest
 contract RedeployNPMWithDescriptor is Script {
+    /// Anvil/local hardhat default account #1 — usable only when the
+    /// admin key isn't supplied AND the chain we're targeting is one
+    /// of the known dev chains. Real environments must set
+    /// `ADMIN_PRIVATE_KEY`.
+    uint256 internal constant LOCAL_DEFAULT_KEY =
+        0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d;
+
     function run(
         address v3Factory,
         address wdel,
@@ -36,7 +43,11 @@ contract RedeployNPMWithDescriptor is Script {
 
         uint256 adminKey = vm.envOr("ADMIN_PRIVATE_KEY", uint256(0));
         if (adminKey == 0) {
-            adminKey = 0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d;
+            require(
+                block.chainid == 31337 || block.chainid == 1336,
+                "ADMIN_PRIVATE_KEY required (default key is dev-only)"
+            );
+            adminKey = LOCAL_DEFAULT_KEY;
         }
 
         vm.startBroadcast(adminKey);

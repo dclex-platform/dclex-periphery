@@ -25,22 +25,40 @@ contract DclexNFTDescriptorTest is Test {
         assertEq(descriptor.baseURI(), INITIAL);
     }
 
-    function test_tokenURI_concatenates_base_and_id() public view {
+    function test_tokenURI_concatenates_base_id_and_trailing_slash() public view {
         // positionManager is ignored by the descriptor — pass a dummy
         INonfungiblePositionManager npm = INonfungiblePositionManager(address(0xDEAD));
         assertEq(
             descriptor.tokenURI(npm, 13),
-            string.concat(INITIAL, "13")
+            string.concat(INITIAL, "13/")
         );
         assertEq(
             descriptor.tokenURI(npm, 0),
-            string.concat(INITIAL, "0")
+            string.concat(INITIAL, "0/")
         );
         // Large ids stringify without truncation.
         assertEq(
             descriptor.tokenURI(npm, 12345678901234567890),
-            string.concat(INITIAL, "12345678901234567890")
+            string.concat(INITIAL, "12345678901234567890/")
         );
+    }
+
+    function test_constructor_reverts_on_empty_base_uri() public {
+        vm.expectRevert(DclexNFTDescriptor.InvalidBaseURI.selector);
+        new DclexNFTDescriptor("");
+    }
+
+    function test_constructor_reverts_on_missing_trailing_slash() public {
+        vm.expectRevert(DclexNFTDescriptor.InvalidBaseURI.selector);
+        new DclexNFTDescriptor("https://api-dev.primedelta.io/nft/positions");
+    }
+
+    function test_setBaseURI_reverts_on_invalid_value() public {
+        vm.expectRevert(DclexNFTDescriptor.InvalidBaseURI.selector);
+        vm.prank(owner);
+        descriptor.setBaseURI("https://example.com/no-slash");
+        // unchanged
+        assertEq(descriptor.baseURI(), INITIAL);
     }
 
     function test_setBaseURI_updates_value_and_emits() public {
