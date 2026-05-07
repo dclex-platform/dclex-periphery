@@ -35,41 +35,61 @@ contract HelperConfig is Script {
     }
 
     uint256 public constant LOCAL_CHAIN_ID = 31337;
-    uint256 public constant PRIMELTA_DEV_CHAIN_ID = 2028;
+    uint256 public constant PRIMEDELTA_DEV_CHAIN_ID = 2028;
+    uint256 public constant PRIMEDELTA_TESTNET_CHAIN_ID = 7357;
 
     NetworkConfig public localNetworkConfig;
-    NetworkConfig public primeltaDevNetworkConfig;
+    NetworkConfig public primedeltaDevNetworkConfig;
+    NetworkConfig public primedeltaTestnetNetworkConfig;
 
     function getConfig(IERC20 dusdToken) public returns (NetworkConfig memory) {
         if (block.chainid == LOCAL_CHAIN_ID) {
             return getLocalConfig(dusdToken);
-        } else if (block.chainid == PRIMELTA_DEV_CHAIN_ID) {
-            return getPrimeltaDevConfig(dusdToken);
+        } else if (block.chainid == PRIMEDELTA_DEV_CHAIN_ID) {
+            return getPrimedeltaDevConfig(dusdToken);
+        } else if (block.chainid == PRIMEDELTA_TESTNET_CHAIN_ID) {
+            return getPrimedeltaTestnetConfig(dusdToken);
         } else {
             revert HelperConfig__InvalidChainId();
         }
     }
 
-    function getPrimeltaDevConfig(
+    function getPrimedeltaDevConfig(
         IERC20 dusdToken
     ) public returns (NetworkConfig memory) {
-        if (address(primeltaDevNetworkConfig.v3SwapRouter) != address(0)) {
-            return primeltaDevNetworkConfig;
+        if (primedeltaDevNetworkConfig.admin != address(0)) {
+            return primedeltaDevNetworkConfig;
         }
 
-        primeltaDevNetworkConfig = NetworkConfig({
+        primedeltaDevNetworkConfig = NetworkConfig({
             v3SwapRouter: ISwapRouter(address(0)),
             v3Quoter: IQuoter(address(0)),
             dusdToken: dusdToken,
             admin: 0x70997970C51812dc3A010C7d01b50e0d17dc79C8
         });
-        return primeltaDevNetworkConfig;
+        return primedeltaDevNetworkConfig;
+    }
+
+    function getPrimedeltaTestnetConfig(
+        IERC20 dusdToken
+    ) public returns (NetworkConfig memory) {
+        if (primedeltaTestnetNetworkConfig.admin != address(0)) {
+            return primedeltaTestnetNetworkConfig;
+        }
+
+        primedeltaTestnetNetworkConfig = NetworkConfig({
+            v3SwapRouter: ISwapRouter(address(0)),
+            v3Quoter: IQuoter(address(0)),
+            dusdToken: dusdToken,
+            admin: vm.envAddress("DCLEX_ADMIN")
+        });
+        return primedeltaTestnetNetworkConfig;
     }
 
     function getLocalConfig(
         IERC20 dusdToken
     ) public returns (NetworkConfig memory) {
-        if (address(localNetworkConfig.v3SwapRouter) != address(0)) {
+        if (localNetworkConfig.admin != address(0)) {
             return localNetworkConfig;
         }
 
