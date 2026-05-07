@@ -57,7 +57,7 @@ contract HelperConfig is Script {
     function getPrimedeltaDevConfig(
         IERC20 dusdToken
     ) public returns (NetworkConfig memory) {
-        if (address(primedeltaDevNetworkConfig.v3SwapRouter) != address(0)) {
+        if (primedeltaDevNetworkConfig.admin != address(0)) {
             return primedeltaDevNetworkConfig;
         }
 
@@ -73,7 +73,7 @@ contract HelperConfig is Script {
     function getPrimedeltaTestnetConfig(
         IERC20 dusdToken
     ) public returns (NetworkConfig memory) {
-        if (address(primedeltaTestnetNetworkConfig.v3SwapRouter) != address(0)) {
+        if (primedeltaTestnetNetworkConfig.admin != address(0)) {
             return primedeltaTestnetNetworkConfig;
         }
 
@@ -81,7 +81,7 @@ contract HelperConfig is Script {
             v3SwapRouter: ISwapRouter(address(0)),
             v3Quoter: IQuoter(address(0)),
             dusdToken: dusdToken,
-            admin: vm.envAddress("ADMIN_PUBLIC")
+            admin: vm.envAddress("DCLEX_ADMIN")
         });
         return primedeltaTestnetNetworkConfig;
     }
@@ -89,7 +89,7 @@ contract HelperConfig is Script {
     function getLocalConfig(
         IERC20 dusdToken
     ) public returns (NetworkConfig memory) {
-        if (address(localNetworkConfig.v3SwapRouter) != address(0)) {
+        if (localNetworkConfig.admin != address(0)) {
             return localNetworkConfig;
         }
 
