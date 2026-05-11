@@ -12,9 +12,6 @@ import {IDclexSwapCallback} from "dclex-protocol/src/IDclexSwapCallback.sol";
 import {
     ISwapRouter
 } from "@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
-import {
-    IQuoter
-} from "@uniswap/v3-periphery/contracts/interfaces/IQuoter.sol";
 import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
 import {IUniswapV3SwapCallback} from "@uniswap/v3-core/contracts/interfaces/callback/IUniswapV3SwapCallback.sol";
 import {TickMath} from "@uniswap/v3-core/contracts/libraries/TickMath.sol";
@@ -48,23 +45,19 @@ contract DclexRouter is Ownable, ReentrancyGuard, IDclexSwapCallback, IUniswapV3
         uint256 maxInputAmount;
     }
 
-    /// @notice Context passed through V3 pool.swap() -> uniswapV3SwapCallback
-    /// @dev Carries who pays, which pool should be calling us, the user's
-    ///      input-side slippage cap, and any oracle update a nested DclexPool
-    ///      swap will need. Note: `msg.value` is 0 inside the V3 callback,
-    ///      but the router still holds the user's original msg.value on its
-    ///      own balance (V3 pools never take ETH), so nested DclexPool calls
-    ///      forward `address(this).balance` to pay the oracle fee.
+    /// @dev `oracleFeeBudget` snapshots msg.value at the entry point so a
+    ///      nested DclexPool call inside the V3 callback (where msg.value=0)
+    ///      can still pay the oracle fee without sweeping unrelated ETH.
     struct V3SwapCallbackData {
-        address payer;              // ultimate source of input tokens
-        address inputToken;         // the token the user is spending
-        address v3Token;           // the V3 token whose pool should be calling us
-        uint256 maxInputAmount;     // user's slippage limit on the input side
-        bytes[] oracleData;     // forwarded to DclexPool if input is DCLEX
+        address payer;
+        address inputToken;
+        address v3Token;
+        uint256 maxInputAmount;
+        uint256 oracleFeeBudget;
+        bytes[] oracleData;
     }
     // V3 infrastructure
     ISwapRouter public immutable v3SwapRouter;
-    IQuoter public immutable v3Quoter;
     IERC20 public immutable stablecoin;
 
     // Pool type registry
@@ -86,17 +79,15 @@ contract DclexRouter is Ownable, ReentrancyGuard, IDclexSwapCallback, IUniswapV3
     error DclexRouter__ZeroAddress();
     error DclexRouter__InvalidFeeTier();
     error DclexRouter__NativeTransferFailed();
+    error DclexRouter__PoolMismatch();
 
     constructor(
         ISwapRouter _v3SwapRouter,
-        IQuoter _v3Quoter,
         IERC20 _stablecoin
     ) Ownable(msg.sender) {
         if (address(_v3SwapRouter) == address(0)) revert DclexRouter__ZeroAddress();
-        if (address(_v3Quoter) == address(0)) revert DclexRouter__ZeroAddress();
         if (address(_stablecoin) == address(0)) revert DclexRouter__ZeroAddress();
         v3SwapRouter = _v3SwapRouter;
-        v3Quoter = _v3Quoter;
         stablecoin = _stablecoin;
     }
 
@@ -172,6 +163,14 @@ contract DclexRouter is Ownable, ReentrancyGuard, IDclexSwapCallback, IUniswapV3
         } else {
             if (feeTier != 500 && feeTier != 3000 && feeTier != 10000) {
                 revert DclexRouter__InvalidFeeTier();
+            }
+            address t0 = IUniswapV3Pool(v3Pool).token0();
+            address t1 = IUniswapV3Pool(v3Pool).token1();
+            bool pairOk = (t0 == address(stablecoin) && t1 == token) ||
+                (t0 == token && t1 == address(stablecoin));
+            if (!pairOk) revert DclexRouter__PoolMismatch();
+            if (IUniswapV3Pool(v3Pool).fee() != feeTier) {
+                revert DclexRouter__PoolMismatch();
             }
             stockPoolType[token] = PoolType.V3;
             stockToV3Pool[token] = v3Pool;
@@ -282,7 +281,8 @@ contract DclexRouter is Ownable, ReentrancyGuard, IDclexSwapCallback, IUniswapV3
             inputAmount = _sellExactOutputOnV3(
                 token,
                 exactOutputAmount,
-                msg.sender
+                msg.sender,
+                maxInputAmount
             );
             uint256 refund = maxInputAmount - inputAmount;
             if (refund > 0) {
@@ -662,14 +662,14 @@ function swapExactOutput(
                 address(stablecoin),
                 stablecoinAmount,
                 dclexPool,              // stablecoin recipient = outer DclexPool
-                // Synthesize a V3 callback context. Setting v3Token=inputToken
-                // means the V3 callback's case (a) will fire and pull from user
-                // — no nested DclexPool runs here, so oracleData is unused.
+                // v3Token == inputToken routes the nested V3 callback to case (a):
+                // pull inputToken from the user, no oracle hop.
                 V3SwapCallbackData({
                     payer: data.payer,
                     inputToken: data.inputToken,
                     v3Token: data.inputToken,
                     maxInputAmount: data.maxInputAmount,
+                    oracleFeeBudget: 0,
                     oracleData: new bytes[](0)
                 })
             );
@@ -717,12 +717,12 @@ function swapExactOutput(
             ? TickMath.MIN_SQRT_RATIO + 1
             : TickMath.MAX_SQRT_RATIO - 1;
 
-        // Build the context the V3 callback will need
         V3SwapCallbackData memory ctx = V3SwapCallbackData({
             payer: payer,
             inputToken: inputToken,
             v3Token: outputToken,
             maxInputAmount: maxInputAmount,
+            oracleFeeBudget: msg.value,
             oracleData: oracleData
         });
 
@@ -838,13 +838,8 @@ function swapExactOutput(
             // payWithSwapExactOutput=false and pulls DCLEX tokens from
             // ctx.payer via safeTransferFrom.
             //
-            // `msg.value` is 0 inside this V3 callback, but the user's
-            // original msg.value is still on the router's balance because
-            // V3 pools never take ETH. Forwarding `address(this).balance`
-            // gives the nested DclexPool what it needs to pay the oracle fee
-            // inside its own updatePriceFeeds call.
             inputUsed = stockToDclexPool[ctx.inputToken].swapExactOutput{
-                value: address(this).balance
+                value: ctx.oracleFeeBudget
             }(
                 false,                  // isBuy = false (selling stock for stablecoin)
                 stablecoinAmount,
@@ -876,6 +871,7 @@ function swapExactOutput(
                 inputToken: ctx.inputToken,
                 v3Token: ctx.inputToken,
                 maxInputAmount: ctx.maxInputAmount,
+                oracleFeeBudget: 0,
                 oracleData: ctx.oracleData
             });
 
@@ -996,12 +992,12 @@ function swapExactOutput(
     function _sellExactOutputOnV3(
         address token,
         uint256 stablecoinAmount,
-        address recipient
+        address recipient,
+        uint256 maxInputAmount
     ) private returns (uint256) {
-        uint256 tokenBalance = IERC20(token).balanceOf(address(this));
         IERC20(token).safeIncreaseAllowance(
             address(v3SwapRouter),
-            tokenBalance
+            maxInputAmount
         );
         return
             v3SwapRouter.exactOutputSingle(
@@ -1012,7 +1008,7 @@ function swapExactOutput(
                     recipient: recipient,
                     deadline: block.timestamp,
                     amountOut: stablecoinAmount,
-                    amountInMaximum: tokenBalance,
+                    amountInMaximum: maxInputAmount,
                     sqrtPriceLimitX96: 0
                 })
             );
@@ -1045,18 +1041,6 @@ function swapExactOutput(
 
 
     // ============ Internal Helpers ============
-
-    function _updatePriceFeeds(
-        address token,
-        bytes[] calldata oracleData
-    ) private {
-        PoolType poolType = stockPoolType[token];
-        if (poolType == PoolType.DCLEX && oracleData.length > 0) {
-            stockToDclexPool[token].updatePriceFeeds{value: msg.value}(
-                oracleData
-            );
-        }
-    }
 
     function _getDclexPool(address token) private view returns (DclexPool) {
         if (stockPoolType[token] != PoolType.DCLEX) {
