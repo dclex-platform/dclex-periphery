@@ -196,11 +196,11 @@ contract DeployAMMStocks is Script {
 
         vm.stopBroadcast();
 
-        // Register wDEL with router as AMM pool so it appears in allStockTokens()
+        // Register wDEL with router as V3 pool so it appears in allStockTokens()
         // Do this BEFORE liquidity so even if liquidity fails, wDEL is registered
         vm.startBroadcast();
         _router.setV3Pool(_weth, poolAddr, 3000);
-        console.log("Registered wDEL with router as AMM pool");
+        console.log("Registered wDEL with router as V3 pool");
         vm.stopBroadcast();
 
         _addWdelLiquidity(poolAddr);
@@ -416,9 +416,9 @@ contract DeployAMMStocks is Script {
         _factory.forceMintStablecoin("dUSD", address(_liquidityHelper), usdcNeeded);
         console.log("Minted dUSD to liquidity helper:", usdcNeeded);
 
-        // 5. Register with router as AMM pool
+        // 5. Register with router as V3 pool
         _router.setV3Pool(stockAddr, poolAddr, 3000);
-        console.log("Registered AMM pool for", symbol);
+        console.log("Registered V3 pool for", symbol);
         vm.stopBroadcast();
 
         // 6. Add two-sided liquidity around current price

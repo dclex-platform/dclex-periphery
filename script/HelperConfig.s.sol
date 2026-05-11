@@ -2,12 +2,6 @@
 pragma solidity ^0.8.26;
 
 import {Script} from "forge-std/Script.sol";
-import {
-    ISwapRouter
-} from "@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
-import {
-    IQuoter
-} from "@uniswap/v3-periphery/contracts/interfaces/IQuoter.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Factory} from "dclex-blockchain/contracts/dclex/Factory.sol";
 
@@ -18,8 +12,6 @@ contract HelperConfig is Script {
     string internal constant DUSD_SYMBOL = "dUSD";
 
     struct NetworkConfig {
-        ISwapRouter v3SwapRouter;
-        IQuoter v3Quoter;
         IERC20 dusdToken;
         address admin;
     }
@@ -62,8 +54,6 @@ contract HelperConfig is Script {
         }
 
         primedeltaDevNetworkConfig = NetworkConfig({
-            v3SwapRouter: ISwapRouter(address(0)),
-            v3Quoter: IQuoter(address(0)),
             dusdToken: dusdToken,
             admin: 0x70997970C51812dc3A010C7d01b50e0d17dc79C8
         });
@@ -78,8 +68,6 @@ contract HelperConfig is Script {
         }
 
         primedeltaTestnetNetworkConfig = NetworkConfig({
-            v3SwapRouter: ISwapRouter(address(0)),
-            v3Quoter: IQuoter(address(0)),
             dusdToken: dusdToken,
             admin: vm.envAddress("DCLEX_ADMIN")
         });
@@ -94,8 +82,6 @@ contract HelperConfig is Script {
         }
 
         localNetworkConfig = NetworkConfig({
-            v3SwapRouter: ISwapRouter(address(0)),
-            v3Quoter: IQuoter(address(0)),
             dusdToken: dusdToken,
             admin: 0x70997970C51812dc3A010C7d01b50e0d17dc79C8
         });

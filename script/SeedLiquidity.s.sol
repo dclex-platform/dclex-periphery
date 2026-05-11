@@ -61,8 +61,10 @@ contract SeedLiquidity is Script {
 
         // Get pool addresses from router
         (bool ok1, bytes memory data1) = router.staticcall(abi.encodeWithSignature("stockToV3Pool(address)", ammt1));
+        require(ok1 && data1.length >= 32, "stockToV3Pool(AMMT1) call failed");
         address ammt1Pool = abi.decode(data1, (address));
         (bool ok2, bytes memory data2) = router.staticcall(abi.encodeWithSignature("stockToV3Pool(address)", ammt2));
+        require(ok2 && data2.length >= 32, "stockToV3Pool(AMMT2) call failed");
         address ammt2Pool = abi.decode(data2, (address));
 
         console.log("AMMT1 Pool:", ammt1Pool);

@@ -14,20 +14,9 @@ import {
 import {DclexRouter} from "src/DclexRouter.sol";
 import {BatchPoolDeployer} from "src/BatchPoolDeployer.sol";
 import {HelperConfig as DclexPeripheryHelperConfig} from "./HelperConfig.s.sol";
-import {ISwapRouter} from "@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
-import {IQuoter} from "@uniswap/v3-periphery/contracts/interfaces/IQuoter.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 contract DeployRouterWithPools is Script {
-    // Struct to bundle deployment parameters and avoid stack depth issues
-    struct DeploymentContext {
-        Factory stocksFactory;
-        uint256 maxPriceStaleness;
-        ISwapRouter v3SwapRouter;
-        IQuoter v3Quoter;
-    }
-
-    // Struct to bundle return values
     struct DeploymentResult {
         DclexRouter router;
         DclexPeripheryHelperConfig.NetworkConfig config;
@@ -36,12 +25,7 @@ contract DeployRouterWithPools is Script {
         DclexPeripheryHelperConfig peripheryHelperConfig;
     }
 
-    function run(
-        Factory stocksFactory,
-        uint256 maxPriceStaleness,
-        ISwapRouter v3SwapRouter,
-        IQuoter v3Quoter
-    )
+    function run(Factory stocksFactory, uint256 maxPriceStaleness)
         external
         returns (
             DclexRouter,
@@ -51,15 +35,7 @@ contract DeployRouterWithPools is Script {
             DclexPeripheryHelperConfig
         )
     {
-        DeploymentContext memory ctx = DeploymentContext({
-            stocksFactory: stocksFactory,
-            maxPriceStaleness: maxPriceStaleness,
-            v3SwapRouter: v3SwapRouter,
-            v3Quoter: v3Quoter
-        });
-
-        DeploymentResult memory result = _deploy(ctx);
-
+        DeploymentResult memory result = _deploy(stocksFactory, maxPriceStaleness);
         return (
             result.router,
             result.config,
@@ -69,8 +45,10 @@ contract DeployRouterWithPools is Script {
         );
     }
 
-    function _deploy(DeploymentContext memory ctx) private returns (DeploymentResult memory result) {
-        // Initialize helper configs
+    function _deploy(Factory stocksFactory, uint256 maxPriceStaleness)
+        private
+        returns (DeploymentResult memory result)
+    {
         vm.startBroadcast();
         result.peripheryHelperConfig = new DclexPeripheryHelperConfig();
         vm.stopBroadcast();
@@ -80,22 +58,10 @@ contract DeployRouterWithPools is Script {
         result.config = result.peripheryHelperConfig.getConfig(protocolConfig.usdcToken);
         result.oracleAddress = address(protocolConfig.oracle);
 
-        // Resolve V3 infrastructure
-        ISwapRouter swapRouter = address(ctx.v3SwapRouter) != address(0)
-            ? ctx.v3SwapRouter
-            : result.config.v3SwapRouter;
-
-        IQuoter quoter = address(ctx.v3Quoter) != address(0)
-            ? ctx.v3Quoter
-            : result.config.v3Quoter;
-
-        // Deploy router + all pools via batch contract (single tx for all pools)
         result.router = _deployRouterAndPoolsViaBatchContract(
-            ctx.stocksFactory,
+            stocksFactory,
             result.protocolHelperConfig,
-            ctx.maxPriceStaleness,
-            swapRouter,
-            quoter,
+            maxPriceStaleness,
             result.config.dusdToken,
             result.config.admin
         );
@@ -107,8 +73,6 @@ contract DeployRouterWithPools is Script {
         Factory stocksFactory;
         DclexProtocolHelperConfig protocolHelperConfig;
         uint256 maxPriceStaleness;
-        ISwapRouter swapRouter;
-        IQuoter quoter;
         IERC20 usdcToken;
         address admin;
     }
@@ -117,14 +81,12 @@ contract DeployRouterWithPools is Script {
         Factory stocksFactory,
         DclexProtocolHelperConfig protocolHelperConfig,
         uint256 maxPriceStaleness,
-        ISwapRouter swapRouter,
-        IQuoter quoter,
         IERC20 usdcToken,
         address admin
     ) private returns (DclexRouter) {
         return _executeBatchDeploy(BatchDeployParams(
             stocksFactory, protocolHelperConfig, maxPriceStaleness,
-            swapRouter, quoter, usdcToken, admin
+            usdcToken, admin
         ));
     }
 
@@ -164,35 +126,4 @@ contract DeployRouterWithPools is Script {
         }
     }
 
-    /// @notice Simplified deployment without external V3 params
-    function run(
-        Factory stocksFactory,
-        uint256 maxPriceStaleness
-    )
-        external
-        returns (
-            DclexRouter,
-            DclexPeripheryHelperConfig.NetworkConfig memory,
-            address,
-            DclexProtocolHelperConfig,
-            DclexPeripheryHelperConfig
-        )
-    {
-        DeploymentContext memory ctx = DeploymentContext({
-            stocksFactory: stocksFactory,
-            maxPriceStaleness: maxPriceStaleness,
-            v3SwapRouter: ISwapRouter(address(0)),
-            v3Quoter: IQuoter(address(0))
-        });
-
-        DeploymentResult memory result = _deploy(ctx);
-
-        return (
-            result.router,
-            result.config,
-            result.oracleAddress,
-            result.protocolHelperConfig,
-            result.peripheryHelperConfig
-        );
-    }
 }

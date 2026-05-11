@@ -191,13 +191,13 @@ contract DclexRouterAMMTest is Test, IUniswapV3MintCallback {
         );
         _initializePool(ammPool2, address(ammStock2), 50e6); // $50 per stock
 
-        // Register AMM pools with router
+        // Register V3 pools with router
         vm.prank(dclexRouter.owner());
         dclexRouter.setV3Pool(address(ammStock1), ammPool1, 3000);
         vm.prank(dclexRouter.owner());
         dclexRouter.setV3Pool(address(ammStock2), ammPool2, 3000);
 
-        // Add liquidity to AMM pools using direct V3 mint
+        // Add liquidity to V3 pools using direct V3 mint
         _addLiquidityToAMMPool(
             address(ammStock1),
             "AMMT1",
@@ -388,7 +388,7 @@ contract DclexRouterAMMTest is Test, IUniswapV3MintCallback {
 
     // ============ Pool Type Tests ============
 
-    function test_SetAMMPool_RegistersPoolCorrectly() public {
+    function test_SetV3Pool_RegistersPoolCorrectly() public {
         address newStock = address(0x1234);
         address newPool = address(0x5678);
         vm.mockCall(newPool, abi.encodeWithSignature("token0()"), abi.encode(address(usdcToken)));
@@ -408,13 +408,13 @@ contract DclexRouterAMMTest is Test, IUniswapV3MintCallback {
     }
 
     function test_GetPoolType_ReturnsCorrectType() public view {
-        // AAPL is CUSTOM
+        // AAPL is on a DCLEX oracle pool
         assertEq(
             uint256(dclexRouter.getPoolType(address(aaplStock))),
             uint256(DclexRouter.PoolType.DCLEX)
         );
 
-        // AMMT1 is AMM
+        // AMMT1 is on a Uniswap V3 pool
         assertEq(
             uint256(dclexRouter.getPoolType(address(ammStock1))),
             uint256(DclexRouter.PoolType.V3)
@@ -427,15 +427,15 @@ contract DclexRouterAMMTest is Test, IUniswapV3MintCallback {
         );
     }
 
-    // ============ AMM Pool Registration Tests ============
+    // ============ V3 Pool Registration Tests ============
 
-    function test_AMMPoolAddresses_AreRegistered() public view {
-        // Verify AMM pools are registered with correct addresses
+    function test_V3PoolAddresses_AreRegistered() public view {
+        // Verify V3 pools are registered with correct addresses
         assertEq(dclexRouter.stockToV3Pool(address(ammStock1)), ammPool1);
         assertEq(dclexRouter.stockToV3Pool(address(ammStock2)), ammPool2);
     }
 
-    function test_AMMStocks_AreInAllStockTokens() public view {
+    function test_V3Stocks_AreInAllStockTokens() public view {
         address[] memory tokens = dclexRouter.allStockTokens();
         bool foundAmm1 = false;
         bool foundAmm2 = false;
@@ -449,8 +449,8 @@ contract DclexRouterAMMTest is Test, IUniswapV3MintCallback {
         assertTrue(foundAmm2, "AMMT2 should be in allStockTokens");
     }
 
-    function test_RemoveAMMPool_SetsTypeToNone() public {
-        // Remove AMM pool
+    function test_RemoveV3Pool_SetsTypeToNone() public {
+        // Remove V3 pool
         vm.prank(ADMIN);
         dclexRouter.setV3Pool(address(ammStock1), address(0), 0);
 
@@ -517,7 +517,7 @@ contract DclexRouterAMMTest is Test, IUniswapV3MintCallback {
 
     // ============ Liquidity Calculation Tests ============
 
-    function test_AMMPool_HasMeaningfulLiquidity() public view {
+    function test_V3Pool_HasMeaningfulLiquidity() public view {
         // Verify pools have meaningful liquidity (significantly better than buggy 1e6)
         IUniswapV3Pool pool1 = IUniswapV3Pool(ammPool1);
         IUniswapV3Pool pool2 = IUniswapV3Pool(ammPool2);
@@ -648,7 +648,7 @@ contract DclexRouterAMMTest is Test, IUniswapV3MintCallback {
     // ============ Cross-Pool Swap Tests (AMM <-> CUSTOM) ============
 
     function test_CrossPool_AMMToCustom_SwapExactInput() public {
-        // Swap AMMT1 (AMM) -> AAPL (CUSTOM)
+        // Swap AMMT1 (V3) -> AAPL (DCLEX)
         uint256 ammt1BalanceBefore = ammStock1.balanceOf(USER_1);
         uint256 aaplBalanceBefore = aaplStock.balanceOf(USER_1);
 
@@ -691,7 +691,7 @@ contract DclexRouterAMMTest is Test, IUniswapV3MintCallback {
     }
 
     function test_CrossPool_CustomToAMM_SwapExactInput() public {
-        // Swap AAPL (CUSTOM) -> AMMT1 (AMM)
+        // Swap AAPL (DCLEX) -> AMMT1 (V3)
         uint256 aaplBalanceBefore = aaplStock.balanceOf(USER_1);
         uint256 ammt1BalanceBefore = ammStock1.balanceOf(USER_1);
 
@@ -781,7 +781,7 @@ contract DclexRouterAMMTest is Test, IUniswapV3MintCallback {
     // with cross-pool exact output swaps. These tests document the expected behavior.
 
     function test_CrossPool_CustomToAMM_SwapExactOutput() public {
-        // Swap AAPL (CUSTOM) -> AMMT1 (AMM) with exact output
+        // Swap AAPL (DCLEX) -> AMMT1 (V3) with exact output
         uint256 exactOutput = 5e18; // Want exactly 5 AMMT1
         uint256 maxInput = 20e18; // Max 20 AAPL
 

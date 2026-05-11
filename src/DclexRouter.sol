@@ -12,10 +12,10 @@ import {IDclexSwapCallback} from "dclex-protocol/src/IDclexSwapCallback.sol";
 import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
 import {IUniswapV3SwapCallback} from "@uniswap/v3-core/contracts/interfaces/callback/IUniswapV3SwapCallback.sol";
 import {TickMath} from "@uniswap/v3-core/contracts/libraries/TickMath.sol";
-//
+
 /// @title DclexRouter
-/// @notice Unified router for dual-DEX: DCLEX oracle pools (DCLEX) + Uniswap V3 V3 pools
-/// @dev wDEL (wrapped DEL) is treated as a normal V3 token — wrapping/unwrapping is frontend responsibility
+/// @notice Unified router for dual-DEX: DCLEX oracle pools + Uniswap V3 pools.
+/// @dev wDEL is treated as a normal V3 token — wrapping/unwrapping is frontend responsibility.
 contract DclexRouter is Ownable, ReentrancyGuard, IDclexSwapCallback, IUniswapV3SwapCallback {
     using SafeERC20 for IERC20;
 
@@ -116,12 +116,6 @@ contract DclexRouter is Ownable, ReentrancyGuard, IDclexSwapCallback, IUniswapV3
             (bool success, ) = msg.sender.call{value: refund}("");
             if (!success) revert DclexRouter__NativeTransferFailed();
         }
-    }
-
-    function _getFeeTier(address token) internal view returns (uint24) {
-        uint24 feeTier = stockToFeeTier[token];
-        if (feeTier == 0) revert DclexRouter__UnknownToken();
-        return feeTier;
     }
 
     // ============ Pool Registry Functions ============
@@ -486,49 +480,48 @@ contract DclexRouter is Ownable, ReentrancyGuard, IDclexSwapCallback, IUniswapV3
         }
     }
 
-function swapExactOutput(
-    address inputToken,
-    address outputToken,
-    uint256 exactOutputAmount,
-    uint256 maxInputAmount,
-    uint256 deadline,
-    bytes[] calldata priceUpdateData
-) external payable nonReentrant checkDeadline(deadline) refundETH {
-    // Callers wanting stablecoin in/out must use buy/sell*Exact* instead.
-    if (
-        inputToken == address(stablecoin) || outputToken == address(stablecoin)
-    ) {
-        revert DclexRouter__StablecoinNotAllowed();
-    }
+    function swapExactOutput(
+        address inputToken,
+        address outputToken,
+        uint256 exactOutputAmount,
+        uint256 maxInputAmount,
+        uint256 deadline,
+        bytes[] calldata priceUpdateData
+    ) external payable nonReentrant checkDeadline(deadline) refundETH {
+        if (
+            inputToken == address(stablecoin) || outputToken == address(stablecoin)
+        ) {
+            revert DclexRouter__StablecoinNotAllowed();
+        }
 
-    PoolType outputType = stockPoolType[outputToken];
+        PoolType outputType = stockPoolType[outputToken];
 
-    if (outputType == PoolType.DCLEX) {
-        _executeDclexExactOutput(
-            inputToken,
-            outputToken,
-            exactOutputAmount,
-            maxInputAmount,
-            msg.sender,
-            priceUpdateData
-        );
-    } else if (outputType == PoolType.V3) {
-        _executeV3ExactOutput(
-            inputToken,
-            outputToken,
-            exactOutputAmount,
-            maxInputAmount,
-            msg.sender,
-            priceUpdateData
-        );
-    } else {
-        revert DclexRouter__UnknownToken();
+        if (outputType == PoolType.DCLEX) {
+            _executeDclexExactOutput(
+                inputToken,
+                outputToken,
+                exactOutputAmount,
+                maxInputAmount,
+                msg.sender,
+                priceUpdateData
+            );
+        } else if (outputType == PoolType.V3) {
+            _executeV3ExactOutput(
+                inputToken,
+                outputToken,
+                exactOutputAmount,
+                maxInputAmount,
+                msg.sender,
+                priceUpdateData
+            );
+        } else {
+            revert DclexRouter__UnknownToken();
+        }
     }
-}
 
     // ============ DCLEX Callback Data Helper ============
 
-    
+
     /// @notice Initiates a swap where the output is a DCLEX stock token
     /// @dev Calls DclexPool.swapExactOutput. Payment (stablecoin) is produced inside
     ///      dclexSwapCallback, which dispatches based on the user's input type.
@@ -584,7 +577,7 @@ function swapExactOutput(
         address token,
         uint256 amount,
         bytes calldata callbackData
-    ) external onlyDclexPool {
+    ) external override onlyDclexPool {
         DclexSwapCallbackData memory data = abi.decode(
             callbackData,
             (DclexSwapCallbackData)
@@ -715,14 +708,14 @@ function swapExactOutput(
         int256 amount0Delta,
         int256 amount1Delta,
         bytes calldata data
-    ) external {
+    ) external override {
         V3SwapCallbackData memory ctx = abi.decode(data, (V3SwapCallbackData));
 
         if (msg.sender != stockToV3Pool[ctx.v3Token]) {
             revert DclexRouter__NotV3Pool();
         }
 
-        // Exactly one delta must be strictly positive (the amount we owe).
+        // At least one delta must be strictly positive — that's the side we owe.
         if (amount0Delta <= 0 && amount1Delta <= 0) {
             revert DclexRouter__InvalidCallback();
         }
