@@ -36,8 +36,7 @@ import {
     IQuoter
 } from "@uniswap/v3-periphery/contracts/interfaces/IQuoter.sol";
 import {WDEL} from "../src/WDEL.sol";
-import {DclexPythMock} from "dclex-protocol/test/PythMock.sol";
-import {PythAdapter} from "dclex-protocol/src/PythAdapter.sol";
+import {MockPriceOracle} from "dclex-protocol/test/MockPriceOracle.sol";
 import {TickMath} from "@uniswap/v3-core/contracts/libraries/TickMath.sol";
 import {
     LiquidityAmounts
@@ -76,9 +75,9 @@ contract DclexRouterAMMTest is Test, IUniswapV3MintCallback {
     address internal ammPool1;
     address internal ammPool2;
 
-    // Pyth mock for custom pools
-    DclexPythMock private pythMock;
-    bytes[] internal PYTH_DATA = new bytes[](0);
+    // Price oracle mock for custom pools
+    MockPriceOracle private priceOracle;
+    bytes[] internal PRICE_DATA = new bytes[](0);
 
     // Mint callback data
     struct MintCallbackData {
@@ -134,18 +133,15 @@ contract DclexRouterAMMTest is Test, IUniswapV3MintCallback {
         ammStock1 = Stock(stocksFactory.stocks("AMMT1"));
         ammStock2 = Stock(stocksFactory.stocks("AMMT2"));
 
-        // Setup Pyth mock
-        PythAdapter pythAdapter = PythAdapter(address(protocolConfig.oracle));
-        pythMock = new DclexPythMock(address(pythAdapter.pyth()));
-        vm.deal(address(pythMock), 1 ether);
+        priceOracle = MockPriceOracle(address(protocolConfig.oracle));
         bytes32 aaplPriceFeedId = dclexProtocolHelperConfig.getPriceFeedId(
             "AAPL"
         );
         bytes32 usdcPriceFeedId = dclexProtocolHelperConfig.getPriceFeedId(
             "USDC"
         );
-        pythMock.updatePrice(aaplPriceFeedId, 20 ether);
-        pythMock.updatePrice(usdcPriceFeedId, 1 ether);
+        priceOracle.setPrice(aaplPriceFeedId, 20 ether);
+        priceOracle.setPrice(usdcPriceFeedId, 1 ether);
 
         // Deploy custom pool for AAPL
         DeployDclexPool dclexPoolDeployer = new DeployDclexPool();
@@ -387,7 +383,7 @@ contract DclexRouterAMMTest is Test, IUniswapV3MintCallback {
         vm.stopPrank();
 
         // Initialize custom pool with liquidity
-        aaplPool.initialize(100e18, 2000e6, PYTH_DATA);
+        aaplPool.initialize(100e18, 2000e6, PRICE_DATA);
 
         // Give test contract ETH
         vm.deal(address(this), 10 ether);
@@ -486,7 +482,7 @@ contract DclexRouterAMMTest is Test, IUniswapV3MintCallback {
             1e18,
             0,
             block.timestamp + 1,
-            PYTH_DATA
+            PRICE_DATA
         );
     }
 
@@ -501,7 +497,7 @@ contract DclexRouterAMMTest is Test, IUniswapV3MintCallback {
             1e18,
             0,
             block.timestamp + 1,
-            PYTH_DATA
+            PRICE_DATA
         );
     }
 
@@ -518,7 +514,7 @@ contract DclexRouterAMMTest is Test, IUniswapV3MintCallback {
             1e18,
             0,
             500, // Deadline in the past
-            PYTH_DATA
+            PRICE_DATA
         );
     }
 
@@ -666,7 +662,7 @@ contract DclexRouterAMMTest is Test, IUniswapV3MintCallback {
             10e18, // 10 AMMT1
             0, // min output
             block.timestamp + 1,
-            PYTH_DATA
+            PRICE_DATA
         );
 
         uint256 ammt1BalanceAfter = ammStock1.balanceOf(USER_1);
@@ -709,7 +705,7 @@ contract DclexRouterAMMTest is Test, IUniswapV3MintCallback {
             10e18, // 10 AAPL
             0, // min output
             block.timestamp + 1,
-            PYTH_DATA
+            PRICE_DATA
         );
 
         uint256 aaplBalanceAfter = aaplStock.balanceOf(USER_1);
@@ -752,7 +748,7 @@ contract DclexRouterAMMTest is Test, IUniswapV3MintCallback {
             10e18, // 10 AMMT1
             0, // min output
             block.timestamp + 1,
-            PYTH_DATA
+            PRICE_DATA
         );
 
         uint256 ammt1BalanceAfter = ammStock1.balanceOf(USER_1);
@@ -802,7 +798,7 @@ contract DclexRouterAMMTest is Test, IUniswapV3MintCallback {
             exactOutput,
             maxInput,
             block.timestamp + 1,
-            PYTH_DATA
+            PRICE_DATA
         );
 
         uint256 aaplBalanceAfter = aaplStock.balanceOf(USER_1);
@@ -840,7 +836,7 @@ contract DclexRouterAMMTest is Test, IUniswapV3MintCallback {
             exactOutput,
             maxInput,
             block.timestamp + 1,
-            new bytes[](0) // No Pyth data for AMM
+            new bytes[](0) // No price data for AMM
         );
 
         uint256 ammt1BalanceAfter = ammStock1.balanceOf(USER_1);

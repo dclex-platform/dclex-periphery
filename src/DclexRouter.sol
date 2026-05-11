@@ -54,7 +54,7 @@ contract DclexRouter is Ownable, ReentrancyGuard, IDclexSwapCallback, IUniswapV3
         address v3Token;
         uint256 maxInputAmount;
         uint256 oracleFeeBudget;
-        bytes[] oracleData;
+        bytes[] priceUpdateData;
     }
     // V3 infrastructure
     ISwapRouter public immutable v3SwapRouter;
@@ -205,7 +205,7 @@ contract DclexRouter is Ownable, ReentrancyGuard, IDclexSwapCallback, IUniswapV3
         uint256 exactOutputAmount,
         uint256 maxInputAmount,
         uint256 deadline,
-        bytes[] calldata oracleData
+        bytes[] calldata priceUpdateData
     ) external payable nonReentrant checkDeadline(deadline) refundETH {
         uint256 inputAmount;
         PoolType poolType = stockPoolType[token];
@@ -225,7 +225,7 @@ contract DclexRouter is Ownable, ReentrancyGuard, IDclexSwapCallback, IUniswapV3
                         maxInputAmount: 0
                     })
                 ),
-                oracleData
+                priceUpdateData
             );
         } else if (poolType == PoolType.V3) {
             stablecoin.safeTransferFrom(msg.sender, address(this), maxInputAmount);
@@ -254,7 +254,7 @@ contract DclexRouter is Ownable, ReentrancyGuard, IDclexSwapCallback, IUniswapV3
         uint256 exactOutputAmount,
         uint256 maxInputAmount,
         uint256 deadline,
-        bytes[] calldata oracleData
+        bytes[] calldata priceUpdateData
     ) external payable nonReentrant checkDeadline(deadline) refundETH {
         uint256 inputAmount;
         PoolType poolType = stockPoolType[token];
@@ -274,7 +274,7 @@ contract DclexRouter is Ownable, ReentrancyGuard, IDclexSwapCallback, IUniswapV3
                         maxInputAmount: 0
                     })
                 ),
-                oracleData
+                priceUpdateData
             );
         } else if (poolType == PoolType.V3) {
             IERC20(token).safeTransferFrom(
@@ -306,7 +306,7 @@ contract DclexRouter is Ownable, ReentrancyGuard, IDclexSwapCallback, IUniswapV3
         uint256 exactInputAmount,
         uint256 minOutputAmount,
         uint256 deadline,
-        bytes[] calldata oracleData
+        bytes[] calldata priceUpdateData
     ) external payable nonReentrant checkDeadline(deadline) refundETH {
         uint256 outputAmount;
         PoolType poolType = stockPoolType[token];
@@ -326,7 +326,7 @@ contract DclexRouter is Ownable, ReentrancyGuard, IDclexSwapCallback, IUniswapV3
                         maxInputAmount: 0
                     })
                 ),
-                oracleData
+                priceUpdateData
             );
         } else if (poolType == PoolType.V3) {
             stablecoin.safeTransferFrom(msg.sender, address(this), exactInputAmount);
@@ -349,7 +349,7 @@ contract DclexRouter is Ownable, ReentrancyGuard, IDclexSwapCallback, IUniswapV3
         uint256 exactInputAmount,
         uint256 minOutputAmount,
         uint256 deadline,
-        bytes[] calldata oracleData
+        bytes[] calldata priceUpdateData
     ) external payable nonReentrant checkDeadline(deadline) refundETH {
         uint256 outputAmount;
         PoolType poolType = stockPoolType[token];
@@ -369,7 +369,7 @@ contract DclexRouter is Ownable, ReentrancyGuard, IDclexSwapCallback, IUniswapV3
                         maxInputAmount: 0
                     })
                 ),
-                oracleData
+                priceUpdateData
             );
         } else if (poolType == PoolType.V3) {
             IERC20(token).safeTransferFrom(
@@ -396,21 +396,40 @@ contract DclexRouter is Ownable, ReentrancyGuard, IDclexSwapCallback, IUniswapV3
         uint256 exactInputAmount,
         uint256 minOutputAmount,
         uint256 deadline,
-        bytes[] calldata oracleData
+        bytes[] calldata priceUpdateData
     ) external payable nonReentrant checkDeadline(deadline) refundETH {
-        // stablecoin is the internal routing hop, never a user-facing leg here.
-        // Callers wanting stablecoin in/out must use buy/sell*Exact* instead.
         if (
             inputToken == address(stablecoin) || outputToken == address(stablecoin)
         ) {
             revert DclexRouter__StablecoinNotAllowed();
         }
 
-        uint256 stablecoinAmount;
-        uint256 outputAmount;
-
-        // Step 1: Input -> stablecoin
         PoolType inputType = stockPoolType[inputToken];
+        uint256 stablecoinAmount = _swapInputLegToStablecoin(
+            inputToken,
+            inputType,
+            exactInputAmount,
+            priceUpdateData
+        );
+
+        uint256 outputAmount = _swapStablecoinLegToOutput(
+            outputToken,
+            stablecoinAmount,
+            inputType,
+            priceUpdateData
+        );
+
+        if (outputAmount < minOutputAmount) {
+            revert DclexRouter__OutputTooLow();
+        }
+    }
+
+    function _swapInputLegToStablecoin(
+        address inputToken,
+        PoolType inputType,
+        uint256 exactInputAmount,
+        bytes[] calldata priceUpdateData
+    ) private returns (uint256 stablecoinAmount) {
         if (inputType == PoolType.DCLEX) {
             bytes memory callbackData = abi.encode(
                 DclexSwapCallbackData({
@@ -422,28 +441,21 @@ contract DclexRouter is Ownable, ReentrancyGuard, IDclexSwapCallback, IUniswapV3
             );
             stablecoinAmount = stockToDclexPool[inputToken].swapExactInput{
                 value: msg.value
-            }(
-                false,
-                exactInputAmount,
-                address(this),
-                callbackData,
-                oracleData
-            );
+            }(false, exactInputAmount, address(this), callbackData, priceUpdateData);
         } else if (inputType == PoolType.V3) {
-            IERC20(inputToken).safeTransferFrom(
-                msg.sender,
-                address(this),
-                exactInputAmount
-            );
-            stablecoinAmount = _sellExactInputOnV3(
-                inputToken,
-                exactInputAmount
-            );
+            IERC20(inputToken).safeTransferFrom(msg.sender, address(this), exactInputAmount);
+            stablecoinAmount = _sellExactInputOnV3(inputToken, exactInputAmount);
         } else {
             revert DclexRouter__UnknownToken();
         }
+    }
 
-        // Step 2: stablecoin -> Output
+    function _swapStablecoinLegToOutput(
+        address outputToken,
+        uint256 stablecoinAmount,
+        PoolType inputType,
+        bytes[] calldata priceUpdateData
+    ) private returns (uint256 outputAmount) {
         PoolType outputType = stockPoolType[outputToken];
         if (outputType == PoolType.DCLEX) {
             bytes memory callbackData = abi.encode(
@@ -454,33 +466,21 @@ contract DclexRouter is Ownable, ReentrancyGuard, IDclexSwapCallback, IUniswapV3
                     maxInputAmount: 0
                 })
             );
-            // If step 1 was DCLEX, oracleData + msg.value were already
-            // consumed by the input pool (the shared oracle is now fresh, so
-            // the output pool reads it without needing its own update).
-            // If step 1 was V3, no oracle update has happened yet — forward
-            // both here so the output pool can run updatePriceFeeds itself.
-            bool outputNeedsUpdate = inputType == PoolType.V3;
+            // Step 1 DCLEX already consumed oracle update; step 1 V3 still needs it.
+            bool needsUpdate = inputType == PoolType.V3;
             outputAmount = stockToDclexPool[outputToken].swapExactInput{
-                value: outputNeedsUpdate ? msg.value : 0
+                value: needsUpdate ? msg.value : 0
             }(
                 true,
                 stablecoinAmount,
                 msg.sender,
                 callbackData,
-                outputNeedsUpdate ? oracleData : new bytes[](0)
+                needsUpdate ? priceUpdateData : new bytes[](0)
             );
         } else if (outputType == PoolType.V3) {
-            outputAmount = _buyExactInputOnV3(
-                outputToken,
-                stablecoinAmount,
-                msg.sender
-            );
+            outputAmount = _buyExactInputOnV3(outputToken, stablecoinAmount, msg.sender);
         } else {
             revert DclexRouter__UnknownToken();
-        }
-
-        if (outputAmount < minOutputAmount) {
-            revert DclexRouter__OutputTooLow();
         }
     }
 
@@ -490,7 +490,7 @@ function swapExactOutput(
     uint256 exactOutputAmount,
     uint256 maxInputAmount,
     uint256 deadline,
-    bytes[] calldata oracleData
+    bytes[] calldata priceUpdateData
 ) external payable nonReentrant checkDeadline(deadline) refundETH {
     // Callers wanting stablecoin in/out must use buy/sell*Exact* instead.
     if (
@@ -508,7 +508,7 @@ function swapExactOutput(
             exactOutputAmount,
             maxInputAmount,
             msg.sender,
-            oracleData
+            priceUpdateData
         );
     } else if (outputType == PoolType.V3) {
         _executeV3ExactOutput(
@@ -517,7 +517,7 @@ function swapExactOutput(
             exactOutputAmount,
             maxInputAmount,
             msg.sender,
-            oracleData
+            priceUpdateData
         );
     } else {
         revert DclexRouter__UnknownToken();
@@ -537,7 +537,7 @@ function swapExactOutput(
         uint256 exactOutputAmount,
         uint256 maxInputAmount,
         address payer,
-        bytes[] calldata oracleData
+        bytes[] calldata priceUpdateData
     ) private {
         // Validate input token
         PoolType inputType = stockPoolType[inputToken];
@@ -567,7 +567,7 @@ function swapExactOutput(
             exactOutputAmount,
             payer,                      // user receives the stock directly
             callbackData,
-            oracleData
+            priceUpdateData
         );
         // Slippage on the input leg is enforced inside dclexSwapCallback
         // via maxInputAmount embedded in callbackData.
@@ -674,7 +674,7 @@ function swapExactOutput(
                     v3Token: data.inputToken,
                     maxInputAmount: data.maxInputAmount,
                     oracleFeeBudget: 0,
-                    oracleData: new bytes[](0)
+                    priceUpdateData: new bytes[](0)
                 })
             );
             return inputUsed;
@@ -696,7 +696,7 @@ function swapExactOutput(
         uint256 exactOutputAmount,
         uint256 maxInputAmount,
         address payer,
-        bytes[] calldata oracleData
+        bytes[] calldata priceUpdateData
     ) private {
         // Validate input token is registered
         PoolType inputType = stockPoolType[inputToken];
@@ -727,7 +727,7 @@ function swapExactOutput(
             v3Token: outputToken,
             maxInputAmount: maxInputAmount,
             oracleFeeBudget: msg.value,
-            oracleData: oracleData
+            priceUpdateData: priceUpdateData
         });
 
         // Kick off the swap. V3 will:
@@ -855,7 +855,7 @@ function swapExactOutput(
                         maxInputAmount: 0
                     })
                 ),
-                ctx.oracleData
+                ctx.priceUpdateData
             );
         } else if (inputType == PoolType.V3) {
             // --- Case (c): input token is on V3 ---
@@ -875,7 +875,7 @@ function swapExactOutput(
                 v3Token: ctx.inputToken,
                 maxInputAmount: ctx.maxInputAmount,
                 oracleFeeBudget: 0,
-                oracleData: ctx.oracleData
+                priceUpdateData: ctx.priceUpdateData
             });
 
             inputUsed = _v3NestedExactOutput(

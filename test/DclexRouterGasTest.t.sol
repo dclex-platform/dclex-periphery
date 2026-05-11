@@ -2,7 +2,7 @@
 pragma solidity ^0.8.26;
 
 import {Test, console} from "forge-std/Test.sol";
-import {DclexPythMock} from "dclex-protocol/test/PythMock.sol";
+import {MockPriceOracle} from "dclex-protocol/test/MockPriceOracle.sol";
 import {DclexRouter} from "../src/DclexRouter.sol";
 import {DclexPool} from "dclex-protocol/src/DclexPool.sol";
 import {DeployDclex} from "dclex-protocol/script/DeployDclex.s.sol";
@@ -35,7 +35,6 @@ import {
 } from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {WDEL} from "../src/WDEL.sol";
-import {PythAdapter} from "dclex-protocol/src/PythAdapter.sol";
 
 contract DclexRouterGasTest is Test {
     bytes32 internal AAPL_PRICE_FEED_ID;
@@ -48,7 +47,7 @@ contract DclexRouterGasTest is Test {
     Stock internal nvdaStock;
     USDCMock internal usdcToken;
     Factory private stocksFactory;
-    DclexPythMock private pythMock;
+    MockPriceOracle private priceOracle;
     DclexRouter private dclexRouter;
     DclexPool private aaplPool;
     DclexPool internal nvdaPool;
@@ -119,17 +118,14 @@ contract DclexRouterGasTest is Test {
             IERC20(address(usdcToken))
         );
 
-        // Setup Pyth mock - need to get the underlying MockPyth from PythAdapter
-        PythAdapter pythAdapter = PythAdapter(address(protocolConfig.oracle));
-        pythMock = new DclexPythMock(address(pythAdapter.pyth()));
-        vm.deal(address(pythMock), 1 ether);
 
+        priceOracle = MockPriceOracle(address(protocolConfig.oracle));
         AAPL_PRICE_FEED_ID = dclexProtocolHelperConfig.getPriceFeedId("AAPL");
         NVDA_PRICE_FEED_ID = dclexProtocolHelperConfig.getPriceFeedId("NVDA");
         USDC_PRICE_FEED_ID = dclexProtocolHelperConfig.getPriceFeedId("USDC");
-        pythMock.updatePrice(AAPL_PRICE_FEED_ID, 20 ether);
-        pythMock.updatePrice(NVDA_PRICE_FEED_ID, 30 ether);
-        pythMock.updatePrice(USDC_PRICE_FEED_ID, 1 ether);
+        priceOracle.setPrice(AAPL_PRICE_FEED_ID, 20 ether);
+        priceOracle.setPrice(NVDA_PRICE_FEED_ID, 30 ether);
+        priceOracle.setPrice(USDC_PRICE_FEED_ID, 1 ether);
 
         // Deploy pools for stocks using deployer
         DeployDclexPool dclexPoolDeployer = new DeployDclexPool();

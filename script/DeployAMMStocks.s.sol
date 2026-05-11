@@ -227,6 +227,12 @@ contract DeployAMMStocks is Script {
 
     /// @notice Add two-sided liquidity to wDEL/dUSD pool
     function _addWdelLiquidity(address poolAddr) private {
+        // WDEL.mint is chainId==31337 only. Skip liquidity on other chains;
+        // the pool is still created + initialized + registered, just empty.
+        if (block.chainid != 31337) {
+            console.log("Skipping wDEL liquidity on non-local chain; pool is empty.");
+            return;
+        }
         // Use configurable wDEL amount (set via runLocalWithConfig or default 5K)
         uint256 wdelAmount = _wdelLiquidityAmount;
         // Calculate USDC needed at $0.01 per wDEL (cheap initial price)
@@ -242,9 +248,8 @@ contract DeployAMMStocks is Script {
         );
         console.log("Sent wDEL to liquidity helper:", wdelAmount);
 
-        // Mint USDC to helper
-        IERC20Mintable(address(_usdc)).mint(address(_liquidityHelper), usdcAmount);
-        console.log("Sent USDC to liquidity helper:", usdcAmount);
+        _factory.forceMintStablecoin("dUSD", address(_liquidityHelper), usdcAmount);
+        console.log("Sent dUSD to liquidity helper:", usdcAmount);
 
         vm.stopBroadcast();
 
@@ -425,9 +430,8 @@ contract DeployAMMStocks is Script {
         );
         console.log("Minted stocks to liquidity helper:", stockLiquidity);
 
-        // Mint USDC to helper (using mock's mint function)
-        IERC20Mintable(address(_usdc)).mint(address(_liquidityHelper), usdcNeeded);
-        console.log("Minted USDC to liquidity helper:", usdcNeeded);
+        _factory.forceMintStablecoin("dUSD", address(_liquidityHelper), usdcNeeded);
+        console.log("Minted dUSD to liquidity helper:", usdcNeeded);
 
         // 5. Register with router as AMM pool
         _router.setV3Pool(stockAddr, poolAddr, 3000);
@@ -586,9 +590,4 @@ contract DeployAMMStocks is Script {
             return uint160((1e9 << 96) / sqrtUsdc);
         }
     }
-}
-
-/// @notice Interface for mintable tokens (USDCMock)
-interface IERC20Mintable {
-    function mint(address to, uint256 amount) external;
 }

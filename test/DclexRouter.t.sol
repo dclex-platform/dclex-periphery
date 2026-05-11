@@ -3,7 +3,7 @@ pragma solidity ^0.8.26;
 
 import {Test, console} from "forge-std/Test.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-import {DclexPythMock} from "dclex-protocol/test/PythMock.sol";
+import {MockPriceOracle} from "dclex-protocol/test/MockPriceOracle.sol";
 import {DclexRouter} from "src/DclexRouter.sol";
 import {DclexPool} from "dclex-protocol/src/DclexPool.sol";
 import {DeployDclex} from "dclex-protocol/script/DeployDclex.s.sol";
@@ -34,10 +34,9 @@ import {
     IUniswapV3Pool
 } from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
 import {WDEL} from "../src/WDEL.sol";
-import {PythAdapter} from "dclex-protocol/src/PythAdapter.sol";
 
 contract DclexRouterTest is Test, TestBalance {
-    bytes[] internal PYTH_DATA = new bytes[](0);
+    bytes[] internal PRICE_DATA = new bytes[](0);
     bytes32 internal AAPL_PRICE_FEED_ID;
     bytes32 internal NVDA_PRICE_FEED_ID;
     bytes32 internal AMZN_PRICE_FEED_ID;
@@ -63,7 +62,7 @@ contract DclexRouterTest is Test, TestBalance {
     Stock internal amznStock;
     USDCMock internal usdcToken;
     Factory private stocksFactory;
-    DclexPythMock private pythMock;
+    MockPriceOracle private priceOracle;
     DclexRouter private dclexRouter;
     DclexPool private aaplPool;
     DclexPool internal nvdaPool;
@@ -137,16 +136,13 @@ contract DclexRouterTest is Test, TestBalance {
             IERC20(address(usdcToken))
         );
 
-        // Setup Pyth mock - need to get the underlying MockPyth from PythAdapter
-        PythAdapter pythAdapter = PythAdapter(address(protocolConfig.oracle));
-        pythMock = new DclexPythMock(address(pythAdapter.pyth()));
-        vm.deal(address(pythMock), 1 ether);
+        priceOracle = MockPriceOracle(address(protocolConfig.oracle));
         AAPL_PRICE_FEED_ID = dclexProtocolHelperConfig.getPriceFeedId("AAPL");
         NVDA_PRICE_FEED_ID = dclexProtocolHelperConfig.getPriceFeedId("NVDA");
         USDC_PRICE_FEED_ID = dclexProtocolHelperConfig.getPriceFeedId("USDC");
-        pythMock.updatePrice(AAPL_PRICE_FEED_ID, 20 ether);
-        pythMock.updatePrice(NVDA_PRICE_FEED_ID, 30 ether);
-        pythMock.updatePrice(USDC_PRICE_FEED_ID, 1 ether);
+        priceOracle.setPrice(AAPL_PRICE_FEED_ID, 20 ether);
+        priceOracle.setPrice(NVDA_PRICE_FEED_ID, 30 ether);
+        priceOracle.setPrice(USDC_PRICE_FEED_ID, 1 ether);
 
         // Deploy DclexPools
         DeployDclexPool dclexPoolDeployer = new DeployDclexPool();
@@ -189,13 +185,13 @@ contract DclexRouterTest is Test, TestBalance {
         usdcToken.approve(address(aaplPool), 100000e6);
         usdcToken.approve(address(nvdaPool), 100000e6);
         vm.stopPrank();
-        aaplPool.initialize(100 ether, 2000e6, PYTH_DATA);
-        nvdaPool.initialize(100 ether, 2000e6, PYTH_DATA);
+        aaplPool.initialize(100 ether, 2000e6, PRICE_DATA);
+        nvdaPool.initialize(100 ether, 2000e6, PRICE_DATA);
 
         // Add liquidity to V3 ETH/USDC pool
         _addV3Liquidity();
 
-        // Give test contract ETH for Pyth update fees
+        // Give test contract ETH for oracle update fees
         vm.deal(address(this), 1 ether);
 
         vm.prank(ADMIN);
@@ -264,7 +260,7 @@ contract DclexRouterTest is Test, TestBalance {
             1 ether,
             1000e6,
             block.timestamp + 1,
-            PYTH_DATA
+            PRICE_DATA
         );
 
         vm.expectCall(
@@ -281,7 +277,7 @@ contract DclexRouterTest is Test, TestBalance {
             5 ether,
             1000e6,
             block.timestamp + 1,
-            PYTH_DATA
+            PRICE_DATA
         );
     }
 
@@ -300,7 +296,7 @@ contract DclexRouterTest is Test, TestBalance {
             1,
             100 ether,
             block.timestamp + 1,
-            PYTH_DATA
+            PRICE_DATA
         );
 
         vm.expectCall(
@@ -317,7 +313,7 @@ contract DclexRouterTest is Test, TestBalance {
             500e6,
             100 ether,
             block.timestamp + 1,
-            PYTH_DATA
+            PRICE_DATA
         );
     }
 
@@ -329,7 +325,7 @@ contract DclexRouterTest is Test, TestBalance {
             2 ether,
             40e6,
             block.timestamp + 1,
-            PYTH_DATA
+            PRICE_DATA
         );
         assertBalanceDecreased(40e6);
 
@@ -340,7 +336,7 @@ contract DclexRouterTest is Test, TestBalance {
             2 ether,
             40e6,
             block.timestamp + 1,
-            PYTH_DATA
+            PRICE_DATA
         );
         assertBalanceDecreased(40e6);
     }
@@ -353,7 +349,7 @@ contract DclexRouterTest is Test, TestBalance {
             40e6,
             2 ether,
             block.timestamp + 1,
-            PYTH_DATA
+            PRICE_DATA
         );
         assertBalanceDecreased(2 ether);
 
@@ -364,7 +360,7 @@ contract DclexRouterTest is Test, TestBalance {
             40e6,
             2 ether,
             block.timestamp + 1,
-            PYTH_DATA
+            PRICE_DATA
         );
         assertBalanceDecreased(2 ether);
     }
@@ -377,7 +373,7 @@ contract DclexRouterTest is Test, TestBalance {
             2 ether,
             40e6,
             block.timestamp + 1,
-            PYTH_DATA
+            PRICE_DATA
         );
         assertBalanceIncreased(2 ether);
 
@@ -388,7 +384,7 @@ contract DclexRouterTest is Test, TestBalance {
             2 ether,
             40e6,
             block.timestamp + 1,
-            PYTH_DATA
+            PRICE_DATA
         );
         assertBalanceIncreased(2 ether);
     }
@@ -401,7 +397,7 @@ contract DclexRouterTest is Test, TestBalance {
             40e6,
             2 ether,
             block.timestamp + 1,
-            PYTH_DATA
+            PRICE_DATA
         );
         assertBalanceIncreased(40e6);
 
@@ -412,7 +408,7 @@ contract DclexRouterTest is Test, TestBalance {
             40e6,
             2 ether,
             block.timestamp + 1,
-            PYTH_DATA
+            PRICE_DATA
         );
         assertBalanceIncreased(40e6);
     }
@@ -425,28 +421,28 @@ contract DclexRouterTest is Test, TestBalance {
             1 ether,
             20e6 + 1,
             block.timestamp + 1,
-            PYTH_DATA
+            PRICE_DATA
         );
         dclexRouter.buyExactOutput(
             address(aaplStock),
             1 ether,
             20e6,
             block.timestamp + 1,
-            PYTH_DATA
+            PRICE_DATA
         );
         dclexRouter.buyExactOutput(
             address(aaplStock),
             2 ether,
             40e6 + 1,
             block.timestamp + 1,
-            PYTH_DATA
+            PRICE_DATA
         );
         dclexRouter.buyExactOutput(
             address(aaplStock),
             2 ether,
             40e6,
             block.timestamp + 1,
-            PYTH_DATA
+            PRICE_DATA
         );
     }
 
@@ -458,28 +454,28 @@ contract DclexRouterTest is Test, TestBalance {
             20e6,
             1 ether + 1,
             block.timestamp + 1,
-            PYTH_DATA
+            PRICE_DATA
         );
         dclexRouter.sellExactOutput(
             address(aaplStock),
             20e6,
             1 ether,
             block.timestamp + 1,
-            PYTH_DATA
+            PRICE_DATA
         );
         dclexRouter.sellExactOutput(
             address(aaplStock),
             40e6,
             2 ether + 1,
             block.timestamp + 1,
-            PYTH_DATA
+            PRICE_DATA
         );
         dclexRouter.sellExactOutput(
             address(aaplStock),
             40e6,
             2 ether,
             block.timestamp + 1,
-            PYTH_DATA
+            PRICE_DATA
         );
     }
 
@@ -492,7 +488,7 @@ contract DclexRouterTest is Test, TestBalance {
             1 ether,
             20e6 - 1,
             block.timestamp + 1,
-            PYTH_DATA
+            PRICE_DATA
         );
         vm.expectRevert(DclexRouter.DclexRouter__InputTooHigh.selector);
         dclexRouter.buyExactOutput(
@@ -500,7 +496,7 @@ contract DclexRouterTest is Test, TestBalance {
             1 ether,
             10e6,
             block.timestamp + 1,
-            PYTH_DATA
+            PRICE_DATA
         );
         vm.expectRevert(DclexRouter.DclexRouter__InputTooHigh.selector);
         dclexRouter.buyExactOutput(
@@ -508,7 +504,7 @@ contract DclexRouterTest is Test, TestBalance {
             2 ether,
             40e6 - 1,
             block.timestamp + 1,
-            PYTH_DATA
+            PRICE_DATA
         );
         vm.expectRevert(DclexRouter.DclexRouter__InputTooHigh.selector);
         dclexRouter.buyExactOutput(
@@ -516,7 +512,7 @@ contract DclexRouterTest is Test, TestBalance {
             2 ether,
             10e6,
             block.timestamp + 1,
-            PYTH_DATA
+            PRICE_DATA
         );
     }
 
@@ -529,7 +525,7 @@ contract DclexRouterTest is Test, TestBalance {
             20e6,
             1 ether - 1,
             block.timestamp + 1,
-            PYTH_DATA
+            PRICE_DATA
         );
         vm.expectRevert(DclexRouter.DclexRouter__InputTooHigh.selector);
         dclexRouter.sellExactOutput(
@@ -537,7 +533,7 @@ contract DclexRouterTest is Test, TestBalance {
             20e6,
             0.5 ether,
             block.timestamp + 1,
-            PYTH_DATA
+            PRICE_DATA
         );
         vm.expectRevert(DclexRouter.DclexRouter__InputTooHigh.selector);
         dclexRouter.sellExactOutput(
@@ -545,7 +541,7 @@ contract DclexRouterTest is Test, TestBalance {
             40e6,
             2 ether - 1,
             block.timestamp + 1,
-            PYTH_DATA
+            PRICE_DATA
         );
         vm.expectRevert(DclexRouter.DclexRouter__InputTooHigh.selector);
         dclexRouter.sellExactOutput(
@@ -553,7 +549,7 @@ contract DclexRouterTest is Test, TestBalance {
             40e6,
             0.5 ether,
             block.timestamp + 1,
-            PYTH_DATA
+            PRICE_DATA
         );
     }
 
@@ -572,7 +568,7 @@ contract DclexRouterTest is Test, TestBalance {
             1,
             1000e6,
             block.timestamp + 1,
-            PYTH_DATA
+            PRICE_DATA
         );
 
         vm.expectCall(
@@ -589,7 +585,7 @@ contract DclexRouterTest is Test, TestBalance {
             500e6,
             1 ether,
             block.timestamp + 1,
-            PYTH_DATA
+            PRICE_DATA
         );
     }
 
@@ -608,7 +604,7 @@ contract DclexRouterTest is Test, TestBalance {
             1 ether,
             0,
             block.timestamp + 1,
-            PYTH_DATA
+            PRICE_DATA
         );
 
         vm.expectCall(
@@ -625,7 +621,7 @@ contract DclexRouterTest is Test, TestBalance {
             5 ether,
             10e6,
             block.timestamp + 1,
-            PYTH_DATA
+            PRICE_DATA
         );
     }
 
@@ -635,8 +631,8 @@ contract DclexRouterTest is Test, TestBalance {
         external
     {
         vm.warp(100);
-        pythMock.updatePrice(AAPL_PRICE_FEED_ID, 20 ether);
-        pythMock.updatePrice(USDC_PRICE_FEED_ID, 1 ether);
+        priceOracle.setPrice(AAPL_PRICE_FEED_ID, 20 ether);
+        priceOracle.setPrice(USDC_PRICE_FEED_ID, 1 ether);
 
         vm.expectRevert(DclexRouter.DclexRouter__DeadlinePassed.selector);
         dclexRouter.buyExactOutput(
@@ -644,7 +640,7 @@ contract DclexRouterTest is Test, TestBalance {
             1 ether,
             20e6,
             10,
-            PYTH_DATA
+            PRICE_DATA
         );
         vm.expectRevert(DclexRouter.DclexRouter__DeadlinePassed.selector);
         dclexRouter.buyExactOutput(
@@ -652,28 +648,28 @@ contract DclexRouterTest is Test, TestBalance {
             1 ether,
             20e6,
             99,
-            PYTH_DATA
+            PRICE_DATA
         );
         dclexRouter.buyExactOutput(
             address(aaplStock),
             1 ether,
             20e6,
             100,
-            PYTH_DATA
+            PRICE_DATA
         );
         dclexRouter.buyExactOutput(
             address(aaplStock),
             1 ether,
             20e6,
             101,
-            PYTH_DATA
+            PRICE_DATA
         );
         dclexRouter.buyExactOutput(
             address(aaplStock),
             1 ether,
             20e6,
             1000,
-            PYTH_DATA
+            PRICE_DATA
         );
     }
 
@@ -681,8 +677,8 @@ contract DclexRouterTest is Test, TestBalance {
         external
     {
         vm.warp(100);
-        pythMock.updatePrice(AAPL_PRICE_FEED_ID, 20 ether);
-        pythMock.updatePrice(USDC_PRICE_FEED_ID, 1 ether);
+        priceOracle.setPrice(AAPL_PRICE_FEED_ID, 20 ether);
+        priceOracle.setPrice(USDC_PRICE_FEED_ID, 1 ether);
 
         vm.expectRevert(DclexRouter.DclexRouter__DeadlinePassed.selector);
         dclexRouter.sellExactOutput(
@@ -690,7 +686,7 @@ contract DclexRouterTest is Test, TestBalance {
             20e6,
             1 ether,
             10,
-            PYTH_DATA
+            PRICE_DATA
         );
         vm.expectRevert(DclexRouter.DclexRouter__DeadlinePassed.selector);
         dclexRouter.sellExactOutput(
@@ -698,28 +694,28 @@ contract DclexRouterTest is Test, TestBalance {
             20e6,
             1 ether,
             99,
-            PYTH_DATA
+            PRICE_DATA
         );
         dclexRouter.sellExactOutput(
             address(aaplStock),
             20e6,
             1 ether,
             100,
-            PYTH_DATA
+            PRICE_DATA
         );
         dclexRouter.sellExactOutput(
             address(aaplStock),
             20e6,
             1 ether,
             101,
-            PYTH_DATA
+            PRICE_DATA
         );
         dclexRouter.sellExactOutput(
             address(aaplStock),
             20e6,
             1 ether,
             1000,
-            PYTH_DATA
+            PRICE_DATA
         );
     }
 
@@ -727,8 +723,8 @@ contract DclexRouterTest is Test, TestBalance {
         external
     {
         vm.warp(100);
-        pythMock.updatePrice(AAPL_PRICE_FEED_ID, 20 ether);
-        pythMock.updatePrice(USDC_PRICE_FEED_ID, 1 ether);
+        priceOracle.setPrice(AAPL_PRICE_FEED_ID, 20 ether);
+        priceOracle.setPrice(USDC_PRICE_FEED_ID, 1 ether);
 
         vm.expectRevert(DclexRouter.DclexRouter__DeadlinePassed.selector);
         dclexRouter.buyExactInput(
@@ -736,7 +732,7 @@ contract DclexRouterTest is Test, TestBalance {
             20e6,
             1 ether,
             10,
-            PYTH_DATA
+            PRICE_DATA
         );
         vm.expectRevert(DclexRouter.DclexRouter__DeadlinePassed.selector);
         dclexRouter.buyExactInput(
@@ -744,28 +740,28 @@ contract DclexRouterTest is Test, TestBalance {
             20e6,
             1 ether,
             99,
-            PYTH_DATA
+            PRICE_DATA
         );
         dclexRouter.buyExactInput(
             address(aaplStock),
             20e6,
             1 ether,
             100,
-            PYTH_DATA
+            PRICE_DATA
         );
         dclexRouter.buyExactInput(
             address(aaplStock),
             20e6,
             1 ether,
             101,
-            PYTH_DATA
+            PRICE_DATA
         );
         dclexRouter.buyExactInput(
             address(aaplStock),
             20e6,
             1 ether,
             1000,
-            PYTH_DATA
+            PRICE_DATA
         );
     }
 
@@ -773,8 +769,8 @@ contract DclexRouterTest is Test, TestBalance {
         external
     {
         vm.warp(100);
-        pythMock.updatePrice(AAPL_PRICE_FEED_ID, 20 ether);
-        pythMock.updatePrice(USDC_PRICE_FEED_ID, 1 ether);
+        priceOracle.setPrice(AAPL_PRICE_FEED_ID, 20 ether);
+        priceOracle.setPrice(USDC_PRICE_FEED_ID, 1 ether);
 
         vm.expectRevert(DclexRouter.DclexRouter__DeadlinePassed.selector);
         dclexRouter.sellExactInput(
@@ -782,7 +778,7 @@ contract DclexRouterTest is Test, TestBalance {
             1 ether,
             20e6,
             10,
-            PYTH_DATA
+            PRICE_DATA
         );
         vm.expectRevert(DclexRouter.DclexRouter__DeadlinePassed.selector);
         dclexRouter.sellExactInput(
@@ -790,28 +786,28 @@ contract DclexRouterTest is Test, TestBalance {
             1 ether,
             20e6,
             99,
-            PYTH_DATA
+            PRICE_DATA
         );
         dclexRouter.sellExactInput(
             address(aaplStock),
             1 ether,
             20e6,
             100,
-            PYTH_DATA
+            PRICE_DATA
         );
         dclexRouter.sellExactInput(
             address(aaplStock),
             1 ether,
             20e6,
             101,
-            PYTH_DATA
+            PRICE_DATA
         );
         dclexRouter.sellExactInput(
             address(aaplStock),
             1 ether,
             20e6,
             1000,
-            PYTH_DATA
+            PRICE_DATA
         );
     }
 
@@ -821,9 +817,9 @@ contract DclexRouterTest is Test, TestBalance {
         external
     {
         vm.warp(100);
-        pythMock.updatePrice(AAPL_PRICE_FEED_ID, 20 ether);
-        pythMock.updatePrice(NVDA_PRICE_FEED_ID, 30 ether);
-        pythMock.updatePrice(USDC_PRICE_FEED_ID, 1 ether);
+        priceOracle.setPrice(AAPL_PRICE_FEED_ID, 20 ether);
+        priceOracle.setPrice(NVDA_PRICE_FEED_ID, 30 ether);
+        priceOracle.setPrice(USDC_PRICE_FEED_ID, 1 ether);
 
         vm.expectRevert(DclexRouter.DclexRouter__DeadlinePassed.selector);
         dclexRouter.swapExactInput(
@@ -832,7 +828,7 @@ contract DclexRouterTest is Test, TestBalance {
             1 ether,
             0,
             10,
-            PYTH_DATA
+            PRICE_DATA
         );
         vm.expectRevert(DclexRouter.DclexRouter__DeadlinePassed.selector);
         dclexRouter.swapExactInput(
@@ -841,7 +837,7 @@ contract DclexRouterTest is Test, TestBalance {
             1 ether,
             0,
             99,
-            PYTH_DATA
+            PRICE_DATA
         );
         dclexRouter.swapExactInput(
             address(aaplStock),
@@ -849,7 +845,7 @@ contract DclexRouterTest is Test, TestBalance {
             1 ether,
             0,
             100,
-            PYTH_DATA
+            PRICE_DATA
         );
         dclexRouter.swapExactInput(
             address(aaplStock),
@@ -857,7 +853,7 @@ contract DclexRouterTest is Test, TestBalance {
             1 ether,
             0,
             101,
-            PYTH_DATA
+            PRICE_DATA
         );
         dclexRouter.swapExactInput(
             address(aaplStock),
@@ -865,7 +861,7 @@ contract DclexRouterTest is Test, TestBalance {
             1 ether,
             0,
             1000,
-            PYTH_DATA
+            PRICE_DATA
         );
     }
 
@@ -877,7 +873,7 @@ contract DclexRouterTest is Test, TestBalance {
             3 ether,
             0,
             block.timestamp + 1,
-            PYTH_DATA
+            PRICE_DATA
         );
         assertBalanceDecreased(3 ether);
 
@@ -888,7 +884,7 @@ contract DclexRouterTest is Test, TestBalance {
             5 ether,
             0,
             block.timestamp + 1,
-            PYTH_DATA
+            PRICE_DATA
         );
         assertBalanceDecreased(5 ether);
     }
@@ -901,7 +897,7 @@ contract DclexRouterTest is Test, TestBalance {
             3 ether,
             0,
             block.timestamp + 1,
-            PYTH_DATA
+            PRICE_DATA
         );
         assertBalanceIncreased(2 ether);
 
@@ -912,7 +908,7 @@ contract DclexRouterTest is Test, TestBalance {
             5 ether,
             0,
             block.timestamp + 1,
-            PYTH_DATA
+            PRICE_DATA
         );
         assertBalanceIncreased(7.5 ether);
     }
@@ -925,7 +921,7 @@ contract DclexRouterTest is Test, TestBalance {
             3 ether,
             0,
             block.timestamp + 1,
-            PYTH_DATA
+            PRICE_DATA
         );
         assertBalanceNotChanged();
 
@@ -936,7 +932,7 @@ contract DclexRouterTest is Test, TestBalance {
             5 ether,
             0,
             block.timestamp + 1,
-            PYTH_DATA
+            PRICE_DATA
         );
         assertBalanceNotChanged();
     }
@@ -950,7 +946,7 @@ contract DclexRouterTest is Test, TestBalance {
             3 ether,
             2 ether - 1,
             block.timestamp + 1,
-            PYTH_DATA
+            PRICE_DATA
         );
         dclexRouter.swapExactInput(
             address(aaplStock),
@@ -958,7 +954,7 @@ contract DclexRouterTest is Test, TestBalance {
             3 ether,
             2 ether,
             block.timestamp + 1,
-            PYTH_DATA
+            PRICE_DATA
         );
         dclexRouter.swapExactInput(
             address(aaplStock),
@@ -966,7 +962,7 @@ contract DclexRouterTest is Test, TestBalance {
             6 ether,
             4 ether - 1,
             block.timestamp + 1,
-            PYTH_DATA
+            PRICE_DATA
         );
         dclexRouter.swapExactInput(
             address(aaplStock),
@@ -974,7 +970,7 @@ contract DclexRouterTest is Test, TestBalance {
             6 ether,
             4 ether,
             block.timestamp + 1,
-            PYTH_DATA
+            PRICE_DATA
         );
     }
 
@@ -988,7 +984,7 @@ contract DclexRouterTest is Test, TestBalance {
             3 ether,
             2 ether + 1,
             block.timestamp + 1,
-            PYTH_DATA
+            PRICE_DATA
         );
         vm.expectRevert(DclexRouter.DclexRouter__OutputTooLow.selector);
         dclexRouter.swapExactInput(
@@ -997,7 +993,7 @@ contract DclexRouterTest is Test, TestBalance {
             3 ether,
             3 ether,
             block.timestamp + 1,
-            PYTH_DATA
+            PRICE_DATA
         );
         vm.expectRevert(DclexRouter.DclexRouter__OutputTooLow.selector);
         dclexRouter.swapExactInput(
@@ -1006,7 +1002,7 @@ contract DclexRouterTest is Test, TestBalance {
             6 ether,
             4 ether + 1,
             block.timestamp + 1,
-            PYTH_DATA
+            PRICE_DATA
         );
         vm.expectRevert(DclexRouter.DclexRouter__OutputTooLow.selector);
         dclexRouter.swapExactInput(
@@ -1015,7 +1011,7 @@ contract DclexRouterTest is Test, TestBalance {
             6 ether,
             5 ether,
             block.timestamp + 1,
-            PYTH_DATA
+            PRICE_DATA
         );
     }
 
@@ -1038,7 +1034,7 @@ contract DclexRouterTest is Test, TestBalance {
             1 ether,
             1000e6,
             block.timestamp + 1,
-            PYTH_DATA
+            PRICE_DATA
         );
     }
 
@@ -1049,7 +1045,7 @@ contract DclexRouterTest is Test, TestBalance {
             1e6,
             1 ether,
             block.timestamp + 1,
-            PYTH_DATA
+            PRICE_DATA
         );
     }
 
@@ -1060,7 +1056,7 @@ contract DclexRouterTest is Test, TestBalance {
             1e6,
             0,
             block.timestamp + 1,
-            PYTH_DATA
+            PRICE_DATA
         );
     }
 
@@ -1071,7 +1067,7 @@ contract DclexRouterTest is Test, TestBalance {
             1 ether,
             0,
             block.timestamp + 1,
-            PYTH_DATA
+            PRICE_DATA
         );
     }
 
@@ -1205,7 +1201,7 @@ contract DclexRouterTest is Test, TestBalance {
             1 ether,
             type(uint256).max,
             block.timestamp + 1,
-            PYTH_DATA
+            PRICE_DATA
         );
     }
 
@@ -1226,7 +1222,7 @@ contract DclexRouterTest is Test, TestBalance {
             100e6,
             0,
             block.timestamp + 1,
-            PYTH_DATA
+            PRICE_DATA
         );
     }
 
@@ -1247,7 +1243,7 @@ contract DclexRouterTest is Test, TestBalance {
             100e6,
             type(uint256).max,
             block.timestamp + 1,
-            PYTH_DATA
+            PRICE_DATA
         );
     }
 
@@ -1268,7 +1264,7 @@ contract DclexRouterTest is Test, TestBalance {
             1 ether,
             0,
             block.timestamp + 1,
-            PYTH_DATA
+            PRICE_DATA
         );
     }
 
@@ -1298,7 +1294,7 @@ contract DclexRouterTest is Test, TestBalance {
             1 ether,
             0,
             block.timestamp + 1,
-            PYTH_DATA
+            PRICE_DATA
         );
     }
 
@@ -1317,7 +1313,7 @@ contract DclexRouterTest is Test, TestBalance {
             1 ether,
             0,
             block.timestamp + 1,
-            PYTH_DATA
+            PRICE_DATA
         );
     }
 
@@ -1334,7 +1330,7 @@ contract DclexRouterTest is Test, TestBalance {
             1 ether,
             type(uint256).max,
             block.timestamp + 1,
-            PYTH_DATA
+            PRICE_DATA
         );
     }
 }
