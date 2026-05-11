@@ -240,26 +240,31 @@ contract DclexRouter is Ownable, ReentrancyGuard, IDclexSwapCallback {
         uint256 exactOutputAmount,
         uint256 maxInputAmount,
         uint256 deadline,
-        bytes[] calldata pythUpdateData
-    ) external payable nonReentrant checkDeadline(deadline) {
+        bytes[] calldata oracleData
+    ) external payable nonReentrant checkDeadline(deadline) refundETH {
         uint256 inputAmount;
         PoolType poolType = stockPoolType[token];
 
-        if (poolType == PoolType.CUSTOM) {
-            inputAmount = _getCustomPool(token).swapExactOutput{
+        if (poolType == PoolType.DCLEX) {
+            inputAmount = _getDclexPool(token).swapExactOutput{
                 value: msg.value
             }(
                 true,
                 exactOutputAmount,
                 msg.sender,
                 abi.encode(
-                    DclexSwapCallbackData(msg.sender, false, address(0), 0)
+                    DclexSwapCallbackData({
+                        payer: msg.sender,
+                        payWithSwapExactOutput: false,
+                        inputToken: address(0),
+                        maxInputAmount: 0
+                    })
                 ),
-                pythUpdateData
+                oracleData
             );
-        } else if (poolType == PoolType.AMM) {
-            usdc.safeTransferFrom(msg.sender, address(this), maxInputAmount);
-            inputAmount = _swapUsdcToAMMExactOutput(
+        } else if (poolType == PoolType.V3) {
+            stablecoin.safeTransferFrom(msg.sender, address(this), maxInputAmount);
+            inputAmount = _buyExactOutputOnV3(
                 token,
                 exactOutputAmount,
                 msg.sender,
@@ -267,7 +272,7 @@ contract DclexRouter is Ownable, ReentrancyGuard, IDclexSwapCallback {
             );
             uint256 refund = maxInputAmount - inputAmount;
             if (refund > 0) {
-                usdc.safeTransfer(msg.sender, refund);
+                stablecoin.safeTransfer(msg.sender, refund);
             }
         } else {
             revert DclexRouter__UnknownToken();
@@ -276,6 +281,7 @@ contract DclexRouter is Ownable, ReentrancyGuard, IDclexSwapCallback {
         if (inputAmount > maxInputAmount) {
             revert DclexRouter__InputTooHigh();
         }
+        
     }
 
     function sellExactOutput(
@@ -283,30 +289,35 @@ contract DclexRouter is Ownable, ReentrancyGuard, IDclexSwapCallback {
         uint256 exactOutputAmount,
         uint256 maxInputAmount,
         uint256 deadline,
-        bytes[] calldata pythUpdateData
-    ) external payable nonReentrant checkDeadline(deadline) {
+        bytes[] calldata oracleData
+    ) external payable nonReentrant checkDeadline(deadline) refundETH {
         uint256 inputAmount;
         PoolType poolType = stockPoolType[token];
 
-        if (poolType == PoolType.CUSTOM) {
-            inputAmount = _getCustomPool(token).swapExactOutput{
+        if (poolType == PoolType.DCLEX) {
+            inputAmount = _getDclexPool(token).swapExactOutput{
                 value: msg.value
             }(
                 false,
                 exactOutputAmount,
                 msg.sender,
                 abi.encode(
-                    DclexSwapCallbackData(msg.sender, false, address(0), 0)
+                    DclexSwapCallbackData({
+                        payer: msg.sender,
+                        payWithSwapExactOutput: false,
+                        inputToken: address(0),
+                        maxInputAmount: 0
+                    })
                 ),
-                pythUpdateData
+                oracleData
             );
-        } else if (poolType == PoolType.AMM) {
+        } else if (poolType == PoolType.V3) {
             IERC20(token).safeTransferFrom(
                 msg.sender,
                 address(this),
                 maxInputAmount
             );
-            inputAmount = _swapAMMToUsdcExactOutput(
+            inputAmount = _sellExactOutputOnV3(
                 token,
                 exactOutputAmount,
                 msg.sender
@@ -329,26 +340,31 @@ contract DclexRouter is Ownable, ReentrancyGuard, IDclexSwapCallback {
         uint256 exactInputAmount,
         uint256 minOutputAmount,
         uint256 deadline,
-        bytes[] calldata pythUpdateData
-    ) external payable nonReentrant checkDeadline(deadline) {
+        bytes[] calldata oracleData
+    ) external payable nonReentrant checkDeadline(deadline) refundETH {
         uint256 outputAmount;
         PoolType poolType = stockPoolType[token];
 
-        if (poolType == PoolType.CUSTOM) {
-            outputAmount = _getCustomPool(token).swapExactInput{
+        if (poolType == PoolType.DCLEX) {
+            outputAmount = _getDclexPool(token).swapExactInput{
                 value: msg.value
             }(
                 true,
                 exactInputAmount,
                 msg.sender,
                 abi.encode(
-                    DclexSwapCallbackData(msg.sender, false, address(0), 0)
+                    DclexSwapCallbackData({
+                        payer: msg.sender,
+                        payWithSwapExactOutput: false,
+                        inputToken: address(0),
+                        maxInputAmount: 0
+                    })
                 ),
-                pythUpdateData
+                oracleData
             );
-        } else if (poolType == PoolType.AMM) {
-            usdc.safeTransferFrom(msg.sender, address(this), exactInputAmount);
-            outputAmount = _swapUsdcToAMMExactInput(
+        } else if (poolType == PoolType.V3) {
+            stablecoin.safeTransferFrom(msg.sender, address(this), exactInputAmount);
+            outputAmount = _buyExactInputOnV3(
                 token,
                 exactInputAmount,
                 msg.sender
@@ -367,31 +383,36 @@ contract DclexRouter is Ownable, ReentrancyGuard, IDclexSwapCallback {
         uint256 exactInputAmount,
         uint256 minOutputAmount,
         uint256 deadline,
-        bytes[] calldata pythUpdateData
-    ) external payable nonReentrant checkDeadline(deadline) {
+        bytes[] calldata oracleData
+    ) external payable nonReentrant checkDeadline(deadline) refundETH {
         uint256 outputAmount;
         PoolType poolType = stockPoolType[token];
 
-        if (poolType == PoolType.CUSTOM) {
-            outputAmount = _getCustomPool(token).swapExactInput{
+        if (poolType == PoolType.DCLEX) {
+            outputAmount = _getDclexPool(token).swapExactInput{
                 value: msg.value
             }(
                 false,
                 exactInputAmount,
                 msg.sender,
                 abi.encode(
-                    DclexSwapCallbackData(msg.sender, false, address(0), 0)
+                    DclexSwapCallbackData({
+                        payer: msg.sender,
+                        payWithSwapExactOutput: false,
+                        inputToken: address(0),
+                        maxInputAmount: 0
+                    })
                 ),
-                pythUpdateData
+                oracleData
             );
-        } else if (poolType == PoolType.AMM) {
+        } else if (poolType == PoolType.V3) {
             IERC20(token).safeTransferFrom(
                 msg.sender,
                 address(this),
                 exactInputAmount
             );
-            outputAmount = _swapAMMToUsdcExactInput(token, exactInputAmount);
-            usdc.safeTransfer(msg.sender, outputAmount);
+            outputAmount = _sellExactInputOnV3(token, exactInputAmount);
+            stablecoin.safeTransfer(msg.sender, outputAmount);
         } else {
             revert DclexRouter__UnknownToken();
         }
