@@ -950,44 +950,41 @@ function swapExactOutput(
             v3SwapRouter.exactInputSingle(
                 ISwapRouter.ExactInputSingleParams({
                     tokenIn: token,
-                    tokenOut: address(usdc),
+                    tokenOut: address(stablecoin),
                     fee: _getFeeTier(token),
                     recipient: address(this),
                     deadline: block.timestamp,
                     amountIn: amount,
-                    // TODO: Add intermediate slippage protection via Quoter
-                    // Currently 0 = vulnerable to sandwich on intermediate hop
                     amountOutMinimum: 0,
                     sqrtPriceLimitX96: 0
                 })
             );
     }
 
-    function _swapUsdcToAMMExactInput(
+    function _buyExactInputOnV3(
         address token,
-        uint256 usdcAmount,
+        uint256 stablecoinAmount,
         address recipient
     ) private returns (uint256) {
-        usdc.safeIncreaseAllowance(address(v3SwapRouter), usdcAmount);
+        stablecoin.safeIncreaseAllowance(address(v3SwapRouter), stablecoinAmount);
         return
             v3SwapRouter.exactInputSingle(
                 ISwapRouter.ExactInputSingleParams({
-                    tokenIn: address(usdc),
+                    tokenIn: address(stablecoin),
                     tokenOut: token,
                     fee: _getFeeTier(token),
                     recipient: recipient,
                     deadline: block.timestamp,
-                    amountIn: usdcAmount,
-                    // TODO: Add intermediate slippage protection via Quoter
+                    amountIn: stablecoinAmount,
                     amountOutMinimum: 0,
                     sqrtPriceLimitX96: 0
                 })
             );
     }
 
-    function _swapAMMToUsdcExactOutput(
+    function _sellExactOutputOnV3(
         address token,
-        uint256 usdcAmount,
+        uint256 stablecoinAmount,
         address recipient
     ) private returns (uint256) {
         uint256 tokenBalance = IERC20(token).balanceOf(address(this));
@@ -999,34 +996,34 @@ function swapExactOutput(
             v3SwapRouter.exactOutputSingle(
                 ISwapRouter.ExactOutputSingleParams({
                     tokenIn: token,
-                    tokenOut: address(usdc),
+                    tokenOut: address(stablecoin),
                     fee: _getFeeTier(token),
                     recipient: recipient,
                     deadline: block.timestamp,
-                    amountOut: usdcAmount,
+                    amountOut: stablecoinAmount,
                     amountInMaximum: tokenBalance,
                     sqrtPriceLimitX96: 0
                 })
             );
     }
 
-    function _swapUsdcToAMMExactOutput(
+    function _buyExactOutputOnV3(
         address token,
         uint256 tokenAmount,
         address recipient,
-        uint256 maxUsdcAmount
+        uint256 maxStablecoinAmount
     ) private returns (uint256) {
-        usdc.safeIncreaseAllowance(address(v3SwapRouter), maxUsdcAmount);
+        stablecoin.safeIncreaseAllowance(address(v3SwapRouter), maxStablecoinAmount);
         return
             v3SwapRouter.exactOutputSingle(
                 ISwapRouter.ExactOutputSingleParams({
-                    tokenIn: address(usdc),
+                    tokenIn: address(stablecoin),
                     tokenOut: token,
                     fee: _getFeeTier(token),
                     recipient: recipient,
                     deadline: block.timestamp,
                     amountOut: tokenAmount,
-                    amountInMaximum: maxUsdcAmount,
+                    amountInMaximum: maxStablecoinAmount,
                     sqrtPriceLimitX96: 0
                 })
             );
@@ -1034,92 +1031,27 @@ function swapExactOutput(
 
     // ============ Cross-Pool ExactOutput Helper ============
 
-    /// @notice Execute a swap where output is an AMM token
-    /// @dev Uses Quoter to determine exact USDC needed, then exact-output on both legs
-    function _executeAMMOutputSwap(
-        address inputToken,
-        address outputToken,
-        uint256 exactOutputAmount,
-        uint256 maxInputAmount,
-        address payer,
-        bytes[] calldata pythUpdateData
-    ) private {
-        // Step 1: Quote how much USDC is needed for the V3 exact output
-        uint256 usdcNeeded = v3Quoter.quoteExactOutputSingle(
-            address(usdc),
-            outputToken,
-            _getFeeTier(outputToken),
-            exactOutputAmount,
-            0
-        );
 
-        // Step 2: Acquire exactly that much USDC from the input
-        uint256 inputUsed;
-        PoolType inputType = stockPoolType[inputToken];
-
-        if (inputType == PoolType.CUSTOM) {
-            inputUsed = stockToCustomPool[inputToken].swapExactOutput{
-                value: msg.value
-            }(
-                false,
-                usdcNeeded,
-                address(this),
-                abi.encode(
-                    DclexSwapCallbackData(payer, false, address(0), 0)
-                ),
-                pythUpdateData
-            );
-        } else if (inputType == PoolType.AMM) {
-            IERC20(inputToken).safeTransferFrom(
-                payer,
-                address(this),
-                maxInputAmount
-            );
-            inputUsed = _swapAMMToUsdcExactOutput(
-                inputToken,
-                usdcNeeded,
-                address(this)
-            );
-            uint256 remainingInput = IERC20(inputToken).balanceOf(address(this));
-            if (remainingInput > 0) {
-                IERC20(inputToken).safeTransfer(payer, remainingInput);
-            }
-        } else {
-            revert DclexRouter__UnknownToken();
-        }
-
-        if (inputUsed > maxInputAmount) {
-            revert DclexRouter__InputTooHigh();
-        }
-
-        // Step 3: Swap USDC -> output token (exact output)
-        _swapUsdcToAMMExactOutput(
-            outputToken,
-            exactOutputAmount,
-            payer,
-            usdcNeeded
-        );
-    }
 
     // ============ Internal Helpers ============
 
     function _updatePriceFeeds(
         address token,
-        bytes[] calldata pythUpdateData
+        bytes[] calldata oracleData
     ) private {
         PoolType poolType = stockPoolType[token];
-        if (poolType == PoolType.CUSTOM && pythUpdateData.length > 0) {
-            stockToCustomPool[token].updatePriceFeeds{value: msg.value}(
-                pythUpdateData
+        if (poolType == PoolType.DCLEX && oracleData.length > 0) {
+            stockToDclexPool[token].updatePriceFeeds{value: msg.value}(
+                oracleData
             );
         }
     }
 
-    function _getCustomPool(address token) private view returns (DclexPool) {
-        if (stockPoolType[token] != PoolType.CUSTOM) {
+    function _getDclexPool(address token) private view returns (DclexPool) {
+        if (stockPoolType[token] != PoolType.DCLEX) {
             revert DclexRouter__UnknownToken();
         }
-        DclexPool pool = stockToCustomPool[token];
+        DclexPool pool = stockToDclexPool[token];
         if (address(pool) == address(0)) {
             revert DclexRouter__UnknownToken();
         }
