@@ -26,19 +26,19 @@ contract DclexPositionManager is NonfungiblePositionManager {
         did = _did;
     }
 
-    /// @notice Override _update to verify DID on transfers (not mints/burns)
-    function _update(
-        address to,
-        uint256 tokenId,
-        address auth
-    ) internal override returns (address from) {
-        from = super._update(to, tokenId, auth);
-
-        // Skip DID check for mints (from=0) and burns (to=0)
-        if (from != address(0) && to != address(0)) {
-            if (!did.verifyTransfer(from, to)) {
+    /// @notice Override _mint to verify DID   
+    function _mint(address to, uint256 tokenId) internal override {
+        if (!did.isValid(did.getId(to))) {
                 revert DclexPositionManager__TransferNotAllowed();
-            }
         }
+        super._mint(to, tokenId);
+    }
+
+    /// @notice Override _transfer to verify DID
+    function _transfer(address from, address to, uint256 tokenId) internal override {
+        if (!did.verifyTransfer(from, to)) {
+            revert DclexPositionManager__TransferNotAllowed();
+        }
+        super._transfer(from, to, tokenId);
     }
 }
