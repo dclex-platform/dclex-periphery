@@ -1365,4 +1365,29 @@ contract DclexRouterTest is Test, TestBalance {
             PRICE_DATA
         );
     }
+
+    function testWithdrawETHRescuesStuckBalance() external {
+        address admin = dclexRouter.owner();
+        address payable receiver = payable(makeAddr("rescue_receiver"));
+        vm.deal(address(dclexRouter), 7 ether);
+
+        uint256 balBefore = receiver.balance;
+        vm.prank(admin);
+        dclexRouter.withdrawETH(receiver);
+
+        assertEq(receiver.balance - balBefore, 7 ether);
+        assertEq(address(dclexRouter).balance, 0);
+    }
+
+    function testWithdrawETHOnlyOwner() external {
+        vm.prank(USER_1);
+        vm.expectRevert();
+        dclexRouter.withdrawETH(payable(USER_1));
+    }
+
+    function testWithdrawETHRevertsOnZeroReceiver() external {
+        vm.prank(dclexRouter.owner());
+        vm.expectRevert(DclexRouter.DclexRouter__ZeroAddress.selector);
+        dclexRouter.withdrawETH(payable(address(0)));
+    }
 }
