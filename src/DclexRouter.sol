@@ -94,84 +94,75 @@ contract DclexRouter is Ownable, ReentrancyGuard, IDclexSwapCallback {
         _;
     }
 
+    modifier refundETH() {
+        uint256 balanceBefore = address(this).balance - msg.value;
+        _;
+        uint256 balanceAfter = address(this).balance;
+        if (balanceAfter > balanceBefore) {
+            uint256 refund = balanceAfter - balanceBefore;
+            (bool success, ) = msg.sender.call{value: refund}("");
+            if (!success) revert DclexRouter__NativeTransferFailed();
+        }
+    }
+
     function _getFeeTier(address token) internal view returns (uint24) {
         uint24 feeTier = stockToFeeTier[token];
-        return feeTier > 0 ? feeTier : DEFAULT_FEE_TIER;
+        if (feeTier == 0) revert DclexRouter__UnknownToken();
+        return feeTier;
     }
 
     // ============ Pool Registry Functions ============
 
-    function setCustomPool(address token, DclexPool pool) external onlyOwner {
+    function setDclexPool(address token, DclexPool pool) external onlyOwner {
+        if (token == address(0)) revert DclexRouter__ZeroAddress();
         if (address(pool) == address(0)) {
-            DclexPool oldPool = stockToCustomPool[token];
+            DclexPool oldPool = stockToDclexPool[token];
             pools[address(oldPool)] = false;
             stockPoolType[token] = PoolType.NONE;
-            delete stockToCustomPool[token];
+            delete stockToDclexPool[token];
             _removeFromStockTokens(token);
-            emit CustomPoolSet(token, address(0));
             emit PoolSetForToken(token, address(0), PoolType.NONE);
         } else {
             // Clear old pool mapping if replacing
-            DclexPool oldPool = stockToCustomPool[token];
+            DclexPool oldPool = stockToDclexPool[token];
             if (address(oldPool) != address(0)) {
                 pools[address(oldPool)] = false;
             }
             pools[address(pool)] = true;
-            stockPoolType[token] = PoolType.CUSTOM;
-            stockToCustomPool[token] = pool;
+            stockPoolType[token] = PoolType.DCLEX;
+            stockToDclexPool[token] = pool;
             _addToStockTokens(token);
-            emit CustomPoolSet(token, address(pool));
-            emit PoolSetForToken(token, address(pool), PoolType.CUSTOM);
+            emit PoolSetForToken(token, address(pool), PoolType.DCLEX);
         }
     }
 
-    error DclexRouter__InvalidFeeTier();
 
-    function setAMMPool(
+    function setV3Pool(
         address token,
         address v3Pool,
         uint24 feeTier
     ) external onlyOwner {
+        if (token == address(0)) revert DclexRouter__ZeroAddress();
         if (v3Pool == address(0)) {
             stockPoolType[token] = PoolType.NONE;
-            delete stockToAMMPool[token];
+            delete stockToV3Pool[token];
             delete stockToFeeTier[token];
             _removeFromStockTokens(token);
-            emit AMMPoolSet(token, address(0));
             emit PoolSetForToken(token, address(0), PoolType.NONE);
         } else {
             if (feeTier != 500 && feeTier != 3000 && feeTier != 10000) {
                 revert DclexRouter__InvalidFeeTier();
             }
-            stockPoolType[token] = PoolType.AMM;
-            stockToAMMPool[token] = v3Pool;
+            stockPoolType[token] = PoolType.V3;
+            stockToV3Pool[token] = v3Pool;
             stockToFeeTier[token] = feeTier;
             _addToStockTokens(token);
-            emit AMMPoolSet(token, v3Pool);
-            emit PoolSetForToken(token, v3Pool, PoolType.AMM);
-        }
-    }
-
-    // Legacy setPool function (Custom pools only)
-    function setPool(address token, DclexPool dclexPool) external onlyOwner {
-        if (address(dclexPool) == address(0)) {
-            DclexPool oldPool = stockToCustomPool[token];
-            pools[address(oldPool)] = false;
-            stockPoolType[token] = PoolType.NONE;
-            delete stockToCustomPool[token];
-            _removeFromStockTokens(token);
-            emit PoolSetForToken(token, address(0), PoolType.NONE);
-        } else {
-            pools[address(dclexPool)] = true;
-            stockPoolType[token] = PoolType.CUSTOM;
-            stockToCustomPool[token] = dclexPool;
-            _addToStockTokens(token);
-            emit PoolSetForToken(token, address(dclexPool), PoolType.CUSTOM);
+            emit PoolSetForToken(token, v3Pool, PoolType.V3);
         }
     }
 
     function stockTokenToPool(address token) external view returns (DclexPool) {
-        return stockToCustomPool[token];
+        return stockToDclexPool[token];
     }
 
     function getPoolType(address token) public view returns (PoolType) {
