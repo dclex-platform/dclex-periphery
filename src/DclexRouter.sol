@@ -64,6 +64,12 @@ contract DclexRouter is Ownable, ReentrancyGuard, IDclexSwapCallback, IUniswapV3
     // Legacy compatibility
     address[] private stockTokens;
     mapping(address => bool) private pools;
+    // Set to the V3 pool we expect to receive `uniswapV3SwapCallback`
+    // from, immediately before calling `pool.swap()`; cleared right
+    // after. Without this an owner-misregistered or maliciously
+    // upgraded pool could fire the callback with attacker-crafted
+    // `data` and drain victims' approvals via `safeTransferFrom`.
+    address private _v3CallbackPool;
 
     event PoolSetForToken(
         address indexed token,
@@ -709,11 +715,13 @@ contract DclexRouter is Ownable, ReentrancyGuard, IDclexSwapCallback, IUniswapV3
         int256 amount1Delta,
         bytes calldata data
     ) external override {
-        V3SwapCallbackData memory ctx = abi.decode(data, (V3SwapCallbackData));
-
-        if (msg.sender != stockToV3Pool[ctx.v3Token]) {
+        // Sentinel set by `_v3Swap` immediately before `pool.swap()`.
+        // Rejects any callback we didn't initiate ourselves, even when
+        // an owner has registered a malicious or upgradeable pool.
+        if (msg.sender != _v3CallbackPool) {
             revert DclexRouter__NotV3Pool();
         }
+        V3SwapCallbackData memory ctx = abi.decode(data, (V3SwapCallbackData));
 
         // At least one delta must be strictly positive — that's the side we owe.
         if (amount0Delta <= 0 && amount1Delta <= 0) {
@@ -847,18 +855,21 @@ contract DclexRouter is Ownable, ReentrancyGuard, IDclexSwapCallback, IUniswapV3
     ) private returns (uint256 amountIn, uint256 amountOut) {
         address poolAddr = stockToV3Pool[ctx.v3Token];
         if (poolAddr == address(0)) revert DclexRouter__UnknownToken();
-        address tokenOut = tokenIn == address(stablecoin) ? ctx.v3Token : address(stablecoin);
-        bool zeroForOne = tokenIn < tokenOut;
-        uint160 sqrtPriceLimitX96 = zeroForOne
-            ? TickMath.MIN_SQRT_RATIO + 1
-            : TickMath.MAX_SQRT_RATIO - 1;
+        // Save/restore allows nested V3 swaps (case (c)) to flip the
+        // sentinel correctly on each leg.
+        address previous = _v3CallbackPool;
+        _v3CallbackPool = poolAddr;
+        bool zeroForOne = tokenIn < (
+            tokenIn == address(stablecoin) ? ctx.v3Token : address(stablecoin)
+        );
         (int256 amount0, int256 amount1) = IUniswapV3Pool(poolAddr).swap(
             recipient,
             zeroForOne,
             amountSpecified,
-            sqrtPriceLimitX96,
+            zeroForOne ? TickMath.MIN_SQRT_RATIO + 1 : TickMath.MAX_SQRT_RATIO - 1,
             abi.encode(ctx)
         );
+        _v3CallbackPool = previous;
         if (zeroForOne) {
             amountIn = uint256(amount0);
             amountOut = uint256(-amount1);

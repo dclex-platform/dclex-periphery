@@ -1390,4 +1390,13 @@ contract DclexRouterTest is Test, TestBalance {
         vm.expectRevert(DclexRouter.DclexRouter__ZeroAddress.selector);
         dclexRouter.withdrawETH(payable(address(0)));
     }
+
+    /// @notice Direct callback invocation outside an in-flight swap must
+    /// revert. Without the in-flight sentinel, a maliciously registered
+    /// pool could fire the callback with attacker-crafted payer/data and
+    /// drain victims' approvals via safeTransferFrom.
+    function testUniswapV3SwapCallbackRevertsWhenNotInFlight() external {
+        vm.expectRevert(DclexRouter.DclexRouter__NotV3Pool.selector);
+        dclexRouter.uniswapV3SwapCallback(1, 0, "");
+    }
 }
