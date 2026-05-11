@@ -9,9 +9,6 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {DclexPool} from "dclex-protocol/src/DclexPool.sol";
 import {IDclexSwapCallback} from "dclex-protocol/src/IDclexSwapCallback.sol";
-import {
-    ISwapRouter
-} from "@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
 import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
 import {IUniswapV3SwapCallback} from "@uniswap/v3-core/contracts/interfaces/callback/IUniswapV3SwapCallback.sol";
 import {TickMath} from "@uniswap/v3-core/contracts/libraries/TickMath.sol";
@@ -56,8 +53,6 @@ contract DclexRouter is Ownable, ReentrancyGuard, IDclexSwapCallback, IUniswapV3
         uint256 oracleFeeBudget;
         bytes[] priceUpdateData;
     }
-    // V3 infrastructure
-    ISwapRouter public immutable v3SwapRouter;
     IERC20 public immutable stablecoin;
 
     // Pool type registry
@@ -81,13 +76,8 @@ contract DclexRouter is Ownable, ReentrancyGuard, IDclexSwapCallback, IUniswapV3
     error DclexRouter__NativeTransferFailed();
     error DclexRouter__PoolMismatch();
 
-    constructor(
-        ISwapRouter _v3SwapRouter,
-        IERC20 _stablecoin
-    ) Ownable(msg.sender) {
-        if (address(_v3SwapRouter) == address(0)) revert DclexRouter__ZeroAddress();
+    constructor(IERC20 _stablecoin) Ownable(msg.sender) {
         if (address(_stablecoin) == address(0)) revert DclexRouter__ZeroAddress();
-        v3SwapRouter = _v3SwapRouter;
         stablecoin = _stablecoin;
     }
 
@@ -802,18 +792,17 @@ function swapExactOutput(
         //         which will resolve to case (a) at its innermost level.
 
         if (tokenOwed == ctx.inputToken) {
-            // Case (a): direct payment from user.
-            //
-            // Legitimately reached only by the nested V3→V3 flow — the
-            // innermost input pool asks for the user's input token on V3.
-
-            if (tokenOwed == address(stablecoin)) {
-                revert DclexRouter__StablecoinNotAllowed();
-            }
+            // Case (a): pay directly with ctx.inputToken. Router holds the
+            // tokens for single-leg flows (entry-points pull from user up
+            // front); cross-pool flows leave the user as payer.
             if (amountOwed > ctx.maxInputAmount) {
                 revert DclexRouter__InputTooHigh();
             }
-            IERC20(tokenOwed).safeTransferFrom(ctx.payer, msg.sender, amountOwed);
+            if (ctx.payer == address(this)) {
+                IERC20(tokenOwed).safeTransfer(msg.sender, amountOwed);
+            } else {
+                IERC20(tokenOwed).safeTransferFrom(ctx.payer, msg.sender, amountOwed);
+            }
         } else if (tokenOwed == address(stablecoin)) {
             // Cases (b) and (c): produce stablecoin by swapping the input token
             _produceStablecoinForV3Payment(ctx, amountOwed, msg.sender);
@@ -950,46 +939,65 @@ function swapExactOutput(
 
 
     // ============ V3 Swap Helpers ============
+    //
+    // All four call `pool.swap()` directly (rather than Uniswap's periphery
+    // `SwapRouter.exact*Single`) so we don't depend on the hardcoded
+    // `POOL_INIT_CODE_HASH` literal in `PoolAddress.sol` matching the
+    // bytecode our Solc pipeline produces. The router holds the input
+    // tokens for these helpers (entry-points pull from user up front),
+    // so `payer = address(this)` and the callback uses `safeTransfer`.
+
+    function _v3Swap(
+        address stockToken,
+        address tokenIn,
+        int256 amountSpecified, // positive = exact input; negative = exact output
+        address recipient,
+        uint256 maxInputAmount
+    ) private returns (uint256 amountIn, uint256 amountOut) {
+        address poolAddr = stockToV3Pool[stockToken];
+        if (poolAddr == address(0)) revert DclexRouter__UnknownToken();
+        address tokenOut = tokenIn == address(stablecoin) ? stockToken : address(stablecoin);
+        bool zeroForOne = tokenIn < tokenOut;
+        uint160 sqrtPriceLimitX96 = zeroForOne
+            ? TickMath.MIN_SQRT_RATIO + 1
+            : TickMath.MAX_SQRT_RATIO - 1;
+        V3SwapCallbackData memory ctx = V3SwapCallbackData({
+            payer: address(this),
+            inputToken: tokenIn,
+            v3Token: stockToken,
+            maxInputAmount: maxInputAmount,
+            oracleFeeBudget: 0,
+            priceUpdateData: new bytes[](0)
+        });
+        (int256 amount0, int256 amount1) = IUniswapV3Pool(poolAddr).swap(
+            recipient,
+            zeroForOne,
+            amountSpecified,
+            sqrtPriceLimitX96,
+            abi.encode(ctx)
+        );
+        if (zeroForOne) {
+            amountIn = uint256(amount0);
+            amountOut = uint256(-amount1);
+        } else {
+            amountIn = uint256(amount1);
+            amountOut = uint256(-amount0);
+        }
+    }
 
     function _sellExactInputOnV3(
         address token,
         uint256 amount
-    ) private returns (uint256) {
-        IERC20(token).safeIncreaseAllowance(address(v3SwapRouter), amount);
-        return
-            v3SwapRouter.exactInputSingle(
-                ISwapRouter.ExactInputSingleParams({
-                    tokenIn: token,
-                    tokenOut: address(stablecoin),
-                    fee: _getFeeTier(token),
-                    recipient: address(this),
-                    deadline: block.timestamp,
-                    amountIn: amount,
-                    amountOutMinimum: 0,
-                    sqrtPriceLimitX96: 0
-                })
-            );
+    ) private returns (uint256 stableOut) {
+        (, stableOut) = _v3Swap(token, token, int256(amount), address(this), amount);
     }
 
     function _buyExactInputOnV3(
         address token,
         uint256 stablecoinAmount,
         address recipient
-    ) private returns (uint256) {
-        stablecoin.safeIncreaseAllowance(address(v3SwapRouter), stablecoinAmount);
-        return
-            v3SwapRouter.exactInputSingle(
-                ISwapRouter.ExactInputSingleParams({
-                    tokenIn: address(stablecoin),
-                    tokenOut: token,
-                    fee: _getFeeTier(token),
-                    recipient: recipient,
-                    deadline: block.timestamp,
-                    amountIn: stablecoinAmount,
-                    amountOutMinimum: 0,
-                    sqrtPriceLimitX96: 0
-                })
-            );
+    ) private returns (uint256 stockOut) {
+        (, stockOut) = _v3Swap(token, address(stablecoin), int256(stablecoinAmount), recipient, stablecoinAmount);
     }
 
     function _sellExactOutputOnV3(
@@ -997,24 +1005,8 @@ function swapExactOutput(
         uint256 stablecoinAmount,
         address recipient,
         uint256 maxInputAmount
-    ) private returns (uint256) {
-        IERC20(token).safeIncreaseAllowance(
-            address(v3SwapRouter),
-            maxInputAmount
-        );
-        return
-            v3SwapRouter.exactOutputSingle(
-                ISwapRouter.ExactOutputSingleParams({
-                    tokenIn: token,
-                    tokenOut: address(stablecoin),
-                    fee: _getFeeTier(token),
-                    recipient: recipient,
-                    deadline: block.timestamp,
-                    amountOut: stablecoinAmount,
-                    amountInMaximum: maxInputAmount,
-                    sqrtPriceLimitX96: 0
-                })
-            );
+    ) private returns (uint256 stockUsed) {
+        (stockUsed, ) = _v3Swap(token, token, -int256(stablecoinAmount), recipient, maxInputAmount);
     }
 
     function _buyExactOutputOnV3(
@@ -1022,21 +1014,8 @@ function swapExactOutput(
         uint256 tokenAmount,
         address recipient,
         uint256 maxStablecoinAmount
-    ) private returns (uint256) {
-        stablecoin.safeIncreaseAllowance(address(v3SwapRouter), maxStablecoinAmount);
-        return
-            v3SwapRouter.exactOutputSingle(
-                ISwapRouter.ExactOutputSingleParams({
-                    tokenIn: address(stablecoin),
-                    tokenOut: token,
-                    fee: _getFeeTier(token),
-                    recipient: recipient,
-                    deadline: block.timestamp,
-                    amountOut: tokenAmount,
-                    amountInMaximum: maxStablecoinAmount,
-                    sqrtPriceLimitX96: 0
-                })
-            );
+    ) private returns (uint256 stableUsed) {
+        (stableUsed, ) = _v3Swap(token, address(stablecoin), -int256(tokenAmount), recipient, maxStablecoinAmount);
     }
 
     // ============ Cross-Pool ExactOutput Helper ============

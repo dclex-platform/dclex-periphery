@@ -131,10 +131,7 @@ contract DclexRouterTest is Test, TestBalance {
         IUniswapV3Pool(ethUsdcPool).initialize(sqrtPriceX96);
 
         // Deploy DclexRouter with V3
-        dclexRouter = new DclexRouter(
-            ISwapRouter(address(v3SwapRouter)),
-            IERC20(address(usdcToken))
-        );
+        dclexRouter = new DclexRouter(IERC20(address(usdcToken)));
 
         priceOracle = MockPriceOracle(address(protocolConfig.oracle));
         AAPL_PRICE_FEED_ID = dclexProtocolHelperConfig.getPriceFeedId("AAPL");

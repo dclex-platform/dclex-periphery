@@ -111,10 +111,7 @@ contract DclexRouterAMMTest is Test, IUniswapV3MintCallback {
         _deployV3Infrastructure();
 
         // Deploy DclexRouter with V3
-        dclexRouter = new DclexRouter(
-            ISwapRouter(address(v3SwapRouter)),
-            IERC20(address(usdcToken))
-        );
+        dclexRouter = new DclexRouter(IERC20(address(usdcToken)));
 
         // Create stocks
         vm.startPrank(ADMIN);

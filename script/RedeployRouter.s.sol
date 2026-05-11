@@ -88,10 +88,7 @@ contract RedeployRouter is Script {
 
         vm.startBroadcast();
 
-        DclexRouter newRouter = new DclexRouter(
-            v3SwapRouter,
-            IERC20(DUSD)
-        );
+        DclexRouter newRouter = new DclexRouter(IERC20(DUSD));
         console.log("New DclexRouter deployed at:", address(newRouter));
 
         for (uint256 i = 0; i < tokens.length; i++) {

@@ -86,28 +86,11 @@ contract DeployAMMStocks is Script {
         _usdc = IERC20(usdcAddr);
         _did = DigitalIdentity(address(_factory.getDID()));
 
-        // Check if V3 infrastructure exists via router
-        ISwapRouter existingRouter = _router.v3SwapRouter();
-
+        // V3 infrastructure for liquidity minting. The DclexRouter no longer
+        // owns a SwapRouter (it calls pool.swap() directly), so this script
+        // always deploys its own V3 factory + SwapRouter for liquidity adds.
         address swapRouterAddr;
-        if (address(existingRouter) == address(0)) {
-            console.log("V3 infrastructure not found, deploying...");
-            (_v3Factory, swapRouterAddr) = _deployV3Infrastructure();
-        } else {
-            console.log(
-                "Using existing V3 SwapRouter:",
-                address(existingRouter)
-            );
-            swapRouterAddr = address(existingRouter);
-            // Use the SAME factory that the SwapRouter uses (critical for routing to work)
-            _v3Factory = IUniswapV3Factory(
-                SwapRouter(payable(swapRouterAddr)).factory()
-            );
-            console.log("Using existing V3 Factory:", address(_v3Factory));
-            // Get wDEL address from SwapRouter's WETH9
-            _weth = SwapRouter(payable(swapRouterAddr)).WETH9();
-            console.log("Using existing wDEL:", _weth);
-        }
+        (_v3Factory, swapRouterAddr) = _deployV3Infrastructure();
 
         // Deploy liquidity helper contract
         vm.startBroadcast();
