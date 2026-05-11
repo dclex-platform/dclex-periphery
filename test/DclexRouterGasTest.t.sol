@@ -116,7 +116,6 @@ contract DclexRouterGasTest is Test {
         // Deploy DclexRouter with V3 infrastructure
         dclexRouter = new DclexRouter(
             ISwapRouter(address(v3SwapRouter)),
-            IQuoter(address(v3Quoter)),
             IERC20(address(usdcToken))
         );
 
@@ -146,8 +145,8 @@ contract DclexRouterGasTest is Test {
         );
 
         // Register pools in router
-        dclexRouter.setPool(address(aaplStock), aaplPool);
-        dclexRouter.setPool(address(nvdaStock), nvdaPool);
+        dclexRouter.setDclexPool(address(aaplStock), aaplPool);
+        dclexRouter.setDclexPool(address(nvdaStock), nvdaPool);
 
         // Mint DIDs for router and pools (needed for token transfers)
         vm.startPrank(ADMIN);

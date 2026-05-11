@@ -134,7 +134,6 @@ contract DclexRouterTest is Test, TestBalance {
         // Deploy DclexRouter with V3
         dclexRouter = new DclexRouter(
             ISwapRouter(address(v3SwapRouter)),
-            IQuoter(address(v3Quoter)),
             IERC20(address(usdcToken))
         );
 
@@ -168,9 +167,9 @@ contract DclexRouterTest is Test, TestBalance {
         );
 
         // Register pools
-        dclexRouter.setPool(address(aaplStock), aaplPool);
-        dclexRouter.setPool(address(nvdaStock), nvdaPool);
-        dclexRouter.setPool(address(amznStock), DclexPool(address(0)));
+        dclexRouter.setDclexPool(address(aaplStock), aaplPool);
+        dclexRouter.setDclexPool(address(nvdaStock), nvdaPool);
+        dclexRouter.setDclexPool(address(amznStock), DclexPool(address(0)));
 
         // Setup accounts
         setupAccount(address(this));
@@ -1024,12 +1023,12 @@ contract DclexRouterTest is Test, TestBalance {
 
     function testSetPoolRevertsWhenCalledByNotAnOwner() external {
         vm.expectPartialRevert(Ownable.OwnableUnauthorizedAccount.selector);
-        dclexRouter.setPool(address(nvdaStock), nvdaPool);
+        dclexRouter.setDclexPool(address(nvdaStock), nvdaPool);
     }
 
     function testSetPoolDoesNotRevertWhenCalledByOwner() external {
         vm.prank(ADMIN);
-        dclexRouter.setPool(address(nvdaStock), nvdaPool);
+        dclexRouter.setDclexPool(address(nvdaStock), nvdaPool);
     }
 
     function testBuyExactOutputRevertsWhenTokenUnknown() external {
@@ -1089,13 +1088,13 @@ contract DclexRouterTest is Test, TestBalance {
         dclexRouter.dclexSwapCallback(address(aaplStock), 1 ether, data);
 
         vm.prank(ADMIN);
-        dclexRouter.setPool(address(amznStock), amznPool);
+        dclexRouter.setDclexPool(address(amznStock), amznPool);
         vm.prank(address(amznPool));
         dclexRouter.dclexSwapCallback(address(aaplStock), 1 ether, data);
 
         vm.prank(ADMIN);
         // we remove pools by setting stock's pool to zero address
-        dclexRouter.setPool(address(amznStock), DclexPool(address(0)));
+        dclexRouter.setDclexPool(address(amznStock), DclexPool(address(0)));
         vm.expectRevert(DclexRouter.DclexRouter__NotDclexPool.selector);
         vm.prank(address(amznPool));
         dclexRouter.dclexSwapCallback(address(aaplStock), 1 ether, data);
@@ -1110,7 +1109,7 @@ contract DclexRouterTest is Test, TestBalance {
         assertEq(result[1], address(nvdaStock));
 
         vm.prank(ADMIN);
-        dclexRouter.setPool(address(aaplStock), DclexPool(address(0)));
+        dclexRouter.setDclexPool(address(aaplStock), DclexPool(address(0)));
         result = dclexRouter.allStockTokens();
         assertEq(result.length, 1);
         assertEq(result[0], address(nvdaStock));
@@ -1120,44 +1119,71 @@ contract DclexRouterTest is Test, TestBalance {
 
     function testSetCustomPoolAddsPoolWithCorrectType() external {
         vm.prank(ADMIN);
-        dclexRouter.setCustomPool(address(amznStock), amznPool);
+        dclexRouter.setDclexPool(address(amznStock), amznPool);
 
         assertEq(
             uint256(dclexRouter.getPoolType(address(amznStock))),
-            uint256(DclexRouter.PoolType.CUSTOM)
+            uint256(DclexRouter.PoolType.DCLEX)
         );
         assertEq(
-            address(dclexRouter.stockToCustomPool(address(amznStock))),
+            address(dclexRouter.stockToDclexPool(address(amznStock))),
             address(amznPool)
         );
     }
 
+    function _mockV3Pool(address pool, address stock, uint24 fee) private {
+        vm.mockCall(pool, abi.encodeWithSignature("token0()"), abi.encode(address(usdcToken)));
+        vm.mockCall(pool, abi.encodeWithSignature("token1()"), abi.encode(stock));
+        vm.mockCall(pool, abi.encodeWithSignature("fee()"), abi.encode(fee));
+    }
+
     function testSetAMMPoolAddsPoolWithCorrectType() external {
         address mockAMMPool = makeAddr("mockAMMPool");
+        _mockV3Pool(mockAMMPool, address(amznStock), 3000);
 
         vm.prank(ADMIN);
-        dclexRouter.setAMMPool(address(amznStock), mockAMMPool, 3000);
+        dclexRouter.setV3Pool(address(amznStock), mockAMMPool, 3000);
 
         assertEq(
             uint256(dclexRouter.getPoolType(address(amznStock))),
-            uint256(DclexRouter.PoolType.AMM)
+            uint256(DclexRouter.PoolType.V3)
         );
-        assertEq(dclexRouter.stockToAMMPool(address(amznStock)), mockAMMPool);
+        assertEq(dclexRouter.stockToV3Pool(address(amznStock)), mockAMMPool);
     }
 
     function testSetAMMPoolCanBeRemoved() external {
         address mockAMMPool = makeAddr("mockAMMPool");
+        _mockV3Pool(mockAMMPool, address(amznStock), 3000);
 
         vm.prank(ADMIN);
-        dclexRouter.setAMMPool(address(amznStock), mockAMMPool, 3000);
+        dclexRouter.setV3Pool(address(amznStock), mockAMMPool, 3000);
 
         vm.prank(ADMIN);
-        dclexRouter.setAMMPool(address(amznStock), address(0), 0);
+        dclexRouter.setV3Pool(address(amznStock), address(0), 0);
 
         assertEq(
             uint256(dclexRouter.getPoolType(address(amznStock))),
             uint256(DclexRouter.PoolType.NONE)
         );
+    }
+
+    function testSetV3PoolRevertsOnTokenMismatch() external {
+        address mockAMMPool = makeAddr("mockAMMPool");
+        address otherStock = makeAddr("otherStock");
+        _mockV3Pool(mockAMMPool, otherStock, 3000);
+
+        vm.prank(ADMIN);
+        vm.expectRevert(DclexRouter.DclexRouter__PoolMismatch.selector);
+        dclexRouter.setV3Pool(address(amznStock), mockAMMPool, 3000);
+    }
+
+    function testSetV3PoolRevertsOnFeeMismatch() external {
+        address mockAMMPool = makeAddr("mockAMMPool");
+        _mockV3Pool(mockAMMPool, address(amznStock), 500);
+
+        vm.prank(ADMIN);
+        vm.expectRevert(DclexRouter.DclexRouter__PoolMismatch.selector);
+        dclexRouter.setV3Pool(address(amznStock), mockAMMPool, 3000);
     }
 
     // ============ Price Feed Tests ============

@@ -62,7 +62,7 @@ contract BatchPoolDeployer {
             IAccessControl(address(pool)).grantRole(DEFAULT_ADMIN_ROLE, params.finalOwner);
             IAccessControl(address(pool)).renounceRole(DEFAULT_ADMIN_ROLE, address(this));
 
-            params.router.setPool(params.stockAddresses[i], pool);
+            params.router.setDclexPool(params.stockAddresses[i], pool);
             digitalIdentity.mintAdmin(address(pool), 2, bytes32(0));
         }
 

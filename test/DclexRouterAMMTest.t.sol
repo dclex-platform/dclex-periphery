@@ -88,7 +88,7 @@ contract DclexRouterAMMTest is Test, IUniswapV3MintCallback {
     }
     MintCallbackData private _mintCallbackData;
 
-    event AMMPoolSet(address indexed token, address v3Pool);
+    event PoolSetForToken(address indexed token, address pool, DclexRouter.PoolType poolType);
 
     receive() external payable {}
 
@@ -114,7 +114,6 @@ contract DclexRouterAMMTest is Test, IUniswapV3MintCallback {
         // Deploy DclexRouter with V3
         dclexRouter = new DclexRouter(
             ISwapRouter(address(v3SwapRouter)),
-            IQuoter(address(v3Quoter)),
             IERC20(address(usdcToken))
         );
 
@@ -155,7 +154,7 @@ contract DclexRouterAMMTest is Test, IUniswapV3MintCallback {
             dclexProtocolHelperConfig,
             60
         );
-        dclexRouter.setPool(address(aaplStock), aaplPool);
+        dclexRouter.setDclexPool(address(aaplStock), aaplPool);
 
         // Create and initialize V3 pools for AMM stocks
         _setupAMMPools();
@@ -201,9 +200,9 @@ contract DclexRouterAMMTest is Test, IUniswapV3MintCallback {
 
         // Register AMM pools with router
         vm.prank(dclexRouter.owner());
-        dclexRouter.setAMMPool(address(ammStock1), ammPool1, 3000);
+        dclexRouter.setV3Pool(address(ammStock1), ammPool1, 3000);
         vm.prank(dclexRouter.owner());
-        dclexRouter.setAMMPool(address(ammStock2), ammPool2, 3000);
+        dclexRouter.setV3Pool(address(ammStock2), ammPool2, 3000);
 
         // Add liquidity to AMM pools using direct V3 mint
         _addLiquidityToAMMPool(
@@ -399,30 +398,33 @@ contract DclexRouterAMMTest is Test, IUniswapV3MintCallback {
     function test_SetAMMPool_RegistersPoolCorrectly() public {
         address newStock = address(0x1234);
         address newPool = address(0x5678);
+        vm.mockCall(newPool, abi.encodeWithSignature("token0()"), abi.encode(address(usdcToken)));
+        vm.mockCall(newPool, abi.encodeWithSignature("token1()"), abi.encode(newStock));
+        vm.mockCall(newPool, abi.encodeWithSignature("fee()"), abi.encode(uint24(3000)));
 
         vm.prank(ADMIN);
-        vm.expectEmit(true, true, false, true);
-        emit AMMPoolSet(newStock, newPool);
-        dclexRouter.setAMMPool(newStock, newPool, 3000);
+        vm.expectEmit(true, false, false, true);
+        emit PoolSetForToken(newStock, newPool, DclexRouter.PoolType.V3);
+        dclexRouter.setV3Pool(newStock, newPool, 3000);
 
         assertEq(
             uint256(dclexRouter.getPoolType(newStock)),
-            uint256(DclexRouter.PoolType.AMM)
+            uint256(DclexRouter.PoolType.V3)
         );
-        assertEq(dclexRouter.stockToAMMPool(newStock), newPool);
+        assertEq(dclexRouter.stockToV3Pool(newStock), newPool);
     }
 
     function test_GetPoolType_ReturnsCorrectType() public view {
         // AAPL is CUSTOM
         assertEq(
             uint256(dclexRouter.getPoolType(address(aaplStock))),
-            uint256(DclexRouter.PoolType.CUSTOM)
+            uint256(DclexRouter.PoolType.DCLEX)
         );
 
         // AMMT1 is AMM
         assertEq(
             uint256(dclexRouter.getPoolType(address(ammStock1))),
-            uint256(DclexRouter.PoolType.AMM)
+            uint256(DclexRouter.PoolType.V3)
         );
 
         // Unknown address is NONE
@@ -436,8 +438,8 @@ contract DclexRouterAMMTest is Test, IUniswapV3MintCallback {
 
     function test_AMMPoolAddresses_AreRegistered() public view {
         // Verify AMM pools are registered with correct addresses
-        assertEq(dclexRouter.stockToAMMPool(address(ammStock1)), ammPool1);
-        assertEq(dclexRouter.stockToAMMPool(address(ammStock2)), ammPool2);
+        assertEq(dclexRouter.stockToV3Pool(address(ammStock1)), ammPool1);
+        assertEq(dclexRouter.stockToV3Pool(address(ammStock2)), ammPool2);
     }
 
     function test_AMMStocks_AreInAllStockTokens() public view {
@@ -457,14 +459,14 @@ contract DclexRouterAMMTest is Test, IUniswapV3MintCallback {
     function test_RemoveAMMPool_SetsTypeToNone() public {
         // Remove AMM pool
         vm.prank(ADMIN);
-        dclexRouter.setAMMPool(address(ammStock1), address(0), 0);
+        dclexRouter.setV3Pool(address(ammStock1), address(0), 0);
 
         // Verify type is now NONE
         assertEq(
             uint256(dclexRouter.getPoolType(address(ammStock1))),
             uint256(DclexRouter.PoolType.NONE)
         );
-        assertEq(dclexRouter.stockToAMMPool(address(ammStock1)), address(0));
+        assertEq(dclexRouter.stockToV3Pool(address(ammStock1)), address(0));
     }
 
     // Note: Full AMM swap tests require integration with properly deployed V3 pools

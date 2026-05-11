@@ -90,7 +90,6 @@ contract RedeployRouter is Script {
 
         DclexRouter newRouter = new DclexRouter(
             v3SwapRouter,
-            v3Quoter,
             IERC20(DUSD)
         );
         console.log("New DclexRouter deployed at:", address(newRouter));
@@ -99,7 +98,7 @@ contract RedeployRouter is Script {
             address token = tokens[i];
             address pool = currentRouter.stockTokenToPool(token);
             require(pool != address(0), "Pool not found for token");
-            newRouter.setPool(token, DclexPool(pool));
+            newRouter.setDclexPool(token, DclexPool(pool));
         }
         console.log("Registered", tokens.length, "pools");
 
