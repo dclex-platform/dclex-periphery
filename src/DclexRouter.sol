@@ -15,11 +15,14 @@ import {
 import {
     IQuoter
 } from "@uniswap/v3-periphery/contracts/interfaces/IQuoter.sol";
-
+import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
+import {IUniswapV3SwapCallback} from "@uniswap/v3-core/contracts/interfaces/callback/IUniswapV3SwapCallback.sol";
+import {TickMath} from "@uniswap/v3-core/contracts/libraries/TickMath.sol";
+//
 /// @title DclexRouter
-/// @notice Unified router for dual-DEX: DCLEX oracle pools (CUSTOM) + Uniswap V3 AMM pools
-/// @dev wDEL (wrapped DEL) is treated as a normal AMM token — wrapping/unwrapping is frontend responsibility
-contract DclexRouter is Ownable, ReentrancyGuard, IDclexSwapCallback {
+/// @notice Unified router for dual-DEX: DCLEX oracle pools (DCLEX) + Uniswap V3 V3 pools
+/// @dev wDEL (wrapped DEL) is treated as a normal V3 token — wrapping/unwrapping is frontend responsibility
+contract DclexRouter is Ownable, ReentrancyGuard, IDclexSwapCallback, IUniswapV3SwapCallback {
     using SafeERC20 for IERC20;
 
     error DclexRouter__InputTooHigh();
@@ -27,11 +30,15 @@ contract DclexRouter is Ownable, ReentrancyGuard, IDclexSwapCallback {
     error DclexRouter__DeadlinePassed();
     error DclexRouter__UnknownToken();
     error DclexRouter__NotDclexPool();
+    error DclexRouter__NotV3Pool();
+    error DclexRouter__InvalidCallback();
+    error DclexRouter__NoLiquidity();
+    error DclexRouter__StablecoinNotAllowed();
 
     enum PoolType {
         NONE,
-        CUSTOM,
-        AMM
+        DCLEX,
+        V3
     }
 
     struct DclexSwapCallbackData {
@@ -41,16 +48,29 @@ contract DclexRouter is Ownable, ReentrancyGuard, IDclexSwapCallback {
         uint256 maxInputAmount;
     }
 
+    /// @notice Context passed through V3 pool.swap() -> uniswapV3SwapCallback
+    /// @dev Carries who pays, which pool should be calling us, the user's
+    ///      input-side slippage cap, and any oracle update a nested DclexPool
+    ///      swap will need. Note: `msg.value` is 0 inside the V3 callback,
+    ///      but the router still holds the user's original msg.value on its
+    ///      own balance (V3 pools never take ETH), so nested DclexPool calls
+    ///      forward `address(this).balance` to pay the oracle fee.
+    struct V3SwapCallbackData {
+        address payer;              // ultimate source of input tokens
+        address inputToken;         // the token the user is spending
+        address v3Token;           // the V3 token whose pool should be calling us
+        uint256 maxInputAmount;     // user's slippage limit on the input side
+        bytes[] oracleData;     // forwarded to DclexPool if input is DCLEX
+    }
     // V3 infrastructure
     ISwapRouter public immutable v3SwapRouter;
     IQuoter public immutable v3Quoter;
-    IERC20 public immutable usdc;
-    uint24 public constant DEFAULT_FEE_TIER = 3000; // 0.3%
+    IERC20 public immutable stablecoin;
 
     // Pool type registry
     mapping(address => PoolType) public stockPoolType;
-    mapping(address => DclexPool) public stockToCustomPool;
-    mapping(address => address) public stockToAMMPool;
+    mapping(address => DclexPool) public stockToDclexPool;
+    mapping(address => address) public stockToV3Pool;
     mapping(address => uint24) public stockToFeeTier;
 
     // Legacy compatibility
@@ -62,22 +82,22 @@ contract DclexRouter is Ownable, ReentrancyGuard, IDclexSwapCallback {
         address pool,
         PoolType poolType
     );
-    event CustomPoolSet(address indexed token, address pool);
-    event AMMPoolSet(address indexed token, address v3Pool);
 
     error DclexRouter__ZeroAddress();
+    error DclexRouter__InvalidFeeTier();
+    error DclexRouter__NativeTransferFailed();
 
     constructor(
         ISwapRouter _v3SwapRouter,
         IQuoter _v3Quoter,
-        IERC20 _usdc
+        IERC20 _stablecoin
     ) Ownable(msg.sender) {
         if (address(_v3SwapRouter) == address(0)) revert DclexRouter__ZeroAddress();
         if (address(_v3Quoter) == address(0)) revert DclexRouter__ZeroAddress();
-        if (address(_usdc) == address(0)) revert DclexRouter__ZeroAddress();
+        if (address(_stablecoin) == address(0)) revert DclexRouter__ZeroAddress();
         v3SwapRouter = _v3SwapRouter;
         v3Quoter = _v3Quoter;
-        usdc = _usdc;
+        stablecoin = _stablecoin;
     }
 
     modifier checkDeadline(uint256 deadline) {
