@@ -182,56 +182,7 @@ contract DclexRouter is Ownable, ReentrancyGuard, IDclexSwapCallback {
         return stockTokens;
     }
 
-    // ============ Callback ============
 
-    function dclexSwapCallback(
-        address token,
-        uint256 amount,
-        bytes calldata callbackData
-    ) external onlyDclexPool {
-        DclexSwapCallbackData memory data = abi.decode(
-            callbackData,
-            (DclexSwapCallbackData)
-        );
-        if (data.payWithSwapExactOutput) {
-            uint256 inputAmount;
-            PoolType inputType = stockPoolType[data.inputToken];
-            if (inputType == PoolType.CUSTOM) {
-                inputAmount = stockToCustomPool[data.inputToken]
-                    .swapExactOutput(
-                        false,
-                        amount,
-                        msg.sender,
-                        abi.encode(
-                            DclexSwapCallbackData(
-                                data.payer,
-                                false,
-                                address(0),
-                                0
-                            )
-                        ),
-                        new bytes[](0)
-                    );
-            } else if (inputType == PoolType.AMM) {
-                inputAmount = _swapAMMToUsdcExactOutput(
-                    data.inputToken,
-                    amount,
-                    msg.sender
-                );
-            } else {
-                revert DclexRouter__UnknownToken();
-            }
-            if (inputAmount > data.maxInputAmount) {
-                revert DclexRouter__InputTooHigh();
-            }
-        } else {
-            if (data.payer == address(this)) {
-                IERC20(token).safeTransfer(msg.sender, amount);
-            } else {
-                IERC20(token).safeTransferFrom(data.payer, msg.sender, amount);
-            }
-        }
-    }
 
     // ============ Single-Token Swap Functions (Buy/Sell) ============
 
@@ -518,67 +469,479 @@ contract DclexRouter is Ownable, ReentrancyGuard, IDclexSwapCallback {
         }
     }
 
-    function swapExactOutput(
+function swapExactOutput(
+    address inputToken,
+    address outputToken,
+    uint256 exactOutputAmount,
+    uint256 maxInputAmount,
+    uint256 deadline,
+    bytes[] calldata oracleData
+) external payable nonReentrant checkDeadline(deadline) refundETH {
+    // Callers wanting stablecoin in/out must use buy/sell*Exact* instead.
+    if (
+        inputToken == address(stablecoin) || outputToken == address(stablecoin)
+    ) {
+        revert DclexRouter__StablecoinNotAllowed();
+    }
+
+    PoolType outputType = stockPoolType[outputToken];
+
+    if (outputType == PoolType.DCLEX) {
+        _executeDclexExactOutput(
+            inputToken,
+            outputToken,
+            exactOutputAmount,
+            maxInputAmount,
+            msg.sender,
+            oracleData
+        );
+    } else if (outputType == PoolType.V3) {
+        _executeV3ExactOutput(
+            inputToken,
+            outputToken,
+            exactOutputAmount,
+            maxInputAmount,
+            msg.sender,
+            oracleData
+        );
+    } else {
+        revert DclexRouter__UnknownToken();
+    }
+}
+
+    // ============ DCLEX Callback Data Helper ============
+
+    
+    /// @notice Initiates a swap where the output is a DCLEX stock token
+    /// @dev Calls DclexPool.swapExactOutput. Payment (stablecoin) is produced inside
+    ///      dclexSwapCallback, which dispatches based on the user's input type.
+    ///      The output token is sent directly from DclexPool to the user.
+    function _executeDclexExactOutput(
         address inputToken,
         address outputToken,
         uint256 exactOutputAmount,
         uint256 maxInputAmount,
-        uint256 deadline,
-        bytes[] calldata pythUpdateData
-    ) external payable nonReentrant checkDeadline(deadline) {
-        PoolType outputType = stockPoolType[outputToken];
-        if (outputType == PoolType.CUSTOM) {
-            bytes memory callbackData = _encodeSwapCallback(
-                msg.sender,
-                true,
-                inputToken,
-                maxInputAmount
+        address payer,
+        bytes[] calldata oracleData
+    ) private {
+        // Validate input token
+        PoolType inputType = stockPoolType[inputToken];
+        if (inputType == PoolType.NONE && inputToken != address(stablecoin)) {
+            revert DclexRouter__UnknownToken();
+        }
+
+        // Build the callback context. payWithSwapExactOutput=true tells the
+        // DCLEX callback that it needs to PRODUCE the input rather than just
+        // pulling it (because the input isn't stablecoin, or even if it is stablecoin the
+        // existing callback handles that case).
+        bytes memory callbackData = abi.encode(
+            DclexSwapCallbackData({
+                payer: payer,
+                payWithSwapExactOutput: true,
+                inputToken: inputToken,
+                maxInputAmount: maxInputAmount
+            })
+        );
+
+        // Initiate the DclexPool exact-output swap. DclexPool will:
+        //   1. Send exactOutputAmount of outputToken to `payer`
+        //   2. Call dclexSwapCallback on us, demanding stablecoin
+        //   3. Complete only after we've delivered stablecoin
+        stockToDclexPool[outputToken].swapExactOutput{value: msg.value}(
+            true,                       // isBuy = true (we provide stablecoin, get stock)
+            exactOutputAmount,
+            payer,                      // user receives the stock directly
+            callbackData,
+            oracleData
+        );
+        // Slippage on the input leg is enforced inside dclexSwapCallback
+        // via maxInputAmount embedded in callbackData.
+    }
+
+    /// @notice Called by a DclexPool mid-swap to collect payment
+    /// @dev Handles three modes:
+    ///      - payWithSwapExactOutput=false, payer=router: router transfers from its own balance
+    ///      - payWithSwapExactOutput=false, payer=user:   pull from user via transferFrom
+    ///      - payWithSwapExactOutput=true:                produce payment by swapping inputToken
+    function dclexSwapCallback(
+        address token,
+        uint256 amount,
+        bytes calldata callbackData
+    ) external onlyDclexPool {
+        DclexSwapCallbackData memory data = abi.decode(
+            callbackData,
+            (DclexSwapCallbackData)
+        );
+
+        if (data.payWithSwapExactOutput) {
+            // We need to produce `amount` of `token` (always stablecoin in this flow,
+            // since DCLEX pools only ever ask for stablecoin during a buy).
+            // Dispatch on the input token type.
+            uint256 inputUsed = _produceStablecoinForDclexPayment(
+                token,                  // should be stablecoin
+                amount,
+                msg.sender,             // stablecoin recipient = the calling DclexPool
+                data
             );
-            stockToCustomPool[outputToken].swapExactOutput{
-                value: msg.value
+
+            // Slippage check on the cumulative input consumed
+            if (inputUsed > data.maxInputAmount) {
+                revert DclexRouter__InputTooHigh();
+            }
+        } else {
+            // Simple mode: payer is either the router itself (already holding tokens)
+            // or the user (pull via transferFrom).
+            if (data.payer == address(this)) {
+                IERC20(token).safeTransfer(msg.sender, amount);
+            } else {
+                IERC20(token).safeTransferFrom(data.payer, msg.sender, amount);
+            }
+        }
+    }
+
+    /// @notice Acquire `stablecoinAmount` of stablecoin and send it to `dclexPool`
+    /// @dev Mirror of _produceStablecoinForV3Payment but called from inside
+    ///      dclexSwapCallback. The recipient is always the DclexPool that
+    ///      initiated the callback (passed as `dclexPool`).
+    function _produceStablecoinForDclexPayment(
+        address tokenOwed,
+        uint256 stablecoinAmount,
+        address dclexPool,
+        DclexSwapCallbackData memory data
+    ) private returns (uint256 inputUsed) {
+        // Sanity: DclexPools should only ever ask us for stablecoin during a buy
+        if (tokenOwed != address(stablecoin)) {
+            revert DclexRouter__InvalidCallback();
+        }
+
+        PoolType inputType = stockPoolType[data.inputToken];
+
+        // --- Case 1: input is another DCLEX stock ---
+        // Sell input stock for stablecoin via its DclexPool. The inner DclexPool
+        // calls dclexSwapCallback again — this time with payWithSwapExactOutput=false
+        // and payer=user, so it'll just pull the input stock from the user.
+        if (inputType == PoolType.DCLEX) {
+            inputUsed = stockToDclexPool[data.inputToken].swapExactOutput(
+                false,                  // isBuy = false (selling stock for stablecoin)
+                stablecoinAmount,
+                dclexPool,              // stablecoin recipient = outer DclexPool
+                abi.encode(
+                    DclexSwapCallbackData({
+                        payer: data.payer,          // payer=user
+                        payWithSwapExactOutput: false,
+                        inputToken: address(0),
+                        maxInputAmount: 0
+                    })
+                ),
+                new bytes[](0)          // no oracle update (both price must be updated in the first call)
+            );
+            return inputUsed;
+        }
+
+        // --- Case 2: input is an V3 token ---
+        // Direct V3 pool call. The V3 callback's case (a) will pull the input
+        // token from the user. stablecoin goes directly to the outer DclexPool.
+        if (inputType == PoolType.V3) {
+            address v3PoolAddr = stockToV3Pool[data.inputToken];
+            if (v3PoolAddr == address(0)) revert DclexRouter__UnknownToken();
+
+            inputUsed = _v3NestedExactOutput(
+                IUniswapV3Pool(v3PoolAddr),
+                data.inputToken,
+                address(stablecoin),
+                stablecoinAmount,
+                dclexPool,              // stablecoin recipient = outer DclexPool
+                // Synthesize a V3 callback context. Setting v3Token=inputToken
+                // means the V3 callback's case (a) will fire and pull from user
+                // — no nested DclexPool runs here, so oracleData is unused.
+                V3SwapCallbackData({
+                    payer: data.payer,
+                    inputToken: data.inputToken,
+                    v3Token: data.inputToken,
+                    maxInputAmount: data.maxInputAmount,
+                    oracleData: new bytes[](0)
+                })
+            );
+            return inputUsed;
+        }
+
+        revert DclexRouter__UnknownToken();
+    }
+
+
+    // ============ V3 Callback Data Helper ============
+
+
+    /// @notice Initiates an exact-output swap where the output comes from a V3 pool
+    /// @dev The payment (stablecoin) is produced inside uniswapV3SwapCallback.
+    ///      The user receives the output directly from the V3 pool.
+    function _executeV3ExactOutput(
+        address inputToken,
+        address outputToken,
+        uint256 exactOutputAmount,
+        uint256 maxInputAmount,
+        address payer,
+        bytes[] calldata oracleData
+    ) private {
+        // Validate input token is registered
+        PoolType inputType = stockPoolType[inputToken];
+        if (inputType == PoolType.NONE && inputToken != address(stablecoin)) {
+            revert DclexRouter__UnknownToken();
+        }
+
+        address v3PoolAddr = stockToV3Pool[outputToken];
+        if (v3PoolAddr == address(0)) revert DclexRouter__UnknownToken();
+        IUniswapV3Pool v3Pool = IUniswapV3Pool(v3PoolAddr);
+
+        // V3 convention: zeroForOne=true means selling token0 for token1.
+        // We're selling stablecoin for the output token.
+        bool zeroForOne = address(stablecoin) < outputToken;
+
+        // Exact output is signaled by negative amountSpecified.
+        int256 amountSpecified = -int256(exactOutputAmount);
+
+        // No price limit at the pool level; we enforce slippage via the input
+        // amount check inside the callback.
+        uint160 sqrtPriceLimitX96 = zeroForOne
+            ? TickMath.MIN_SQRT_RATIO + 1
+            : TickMath.MAX_SQRT_RATIO - 1;
+
+        // Build the context the V3 callback will need
+        V3SwapCallbackData memory ctx = V3SwapCallbackData({
+            payer: payer,
+            inputToken: inputToken,
+            v3Token: outputToken,
+            maxInputAmount: maxInputAmount,
+            oracleData: oracleData
+        });
+
+        // Kick off the swap. V3 will:
+        //   1. Send exactOutputAmount of outputToken to `payer`
+        //   2. Call uniswapV3SwapCallback on us demanding stablecoin
+        //   3. Complete only if we paid
+        (int256 amount0, int256 amount1) = v3Pool.swap(
+            payer,                     // output recipient = user
+            zeroForOne,
+            amountSpecified,
+            sqrtPriceLimitX96,
+            abi.encode(ctx)
+        );
+
+        // Sanity check: we should have received the full requested output.
+        // V3 can return slightly more than requested due to tick rounding,
+        // but not less.
+        int256 receivedOutput = zeroForOne ? -amount1 : -amount0;
+        if (receivedOutput < int256(exactOutputAmount)) {
+            revert DclexRouter__NoLiquidity();
+        }
+    }
+
+    /// @notice Called by a V3 pool mid-swap to collect payment
+    /// @param amount0Delta  token0 owed (positive) or received (negative)
+    /// @param amount1Delta  token1 owed (positive) or received (negative)
+    /// @param data          abi-encoded V3SwapCallbackData
+
+    function uniswapV3SwapCallback(
+        int256 amount0Delta,
+        int256 amount1Delta,
+        bytes calldata data
+    ) external {
+        V3SwapCallbackData memory ctx = abi.decode(data, (V3SwapCallbackData));
+
+        if (msg.sender != stockToV3Pool[ctx.v3Token]) {
+            revert DclexRouter__NotV3Pool();
+        }
+
+        // Exactly one delta must be strictly positive (the amount we owe).
+        if (amount0Delta <= 0 && amount1Delta <= 0) {
+            revert DclexRouter__InvalidCallback();
+        }
+
+        // --- Identify token and amount owed ---
+        IUniswapV3Pool pool = IUniswapV3Pool(msg.sender);
+        address tokenOwed;
+        uint256 amountOwed;
+        if (amount0Delta > 0) {
+            tokenOwed = pool.token0();
+            amountOwed = uint256(amount0Delta);
+        } else {
+            tokenOwed = pool.token1();
+            amountOwed = uint256(amount1Delta);
+        }
+
+        // --- Pay the V3 pool ---
+        // Three mutually exclusive cases based on what we owe:
+        //
+        //   (a) The token owed IS the user's input token.
+        //       → Pull directly from the user.
+        //       → This happens when we're deep inside a nested callback chain and the
+        //         innermost pool is asking for the user's original input.
+        //
+        //   (b) The token owed is stablecoin, and the user's input is a token on DCLEX.
+        //       → Trigger a DCLEX swap to produce stablecoin, sent directly to `pool`.
+        //       → The DclexPool will call dclexSwapCallback, which will pull
+        //         the DCLEX token from the user.
+        //
+        //   (c) The token owed is stablecoin, and the user's input is another token on UniV3.
+        //       → Trigger a V3 swap to produce stablecoin, sent directly to `pool`.
+        //         This nests another uniswapV3SwapCallback,
+        //         which will resolve to case (a) at its innermost level.
+
+        if (tokenOwed == ctx.inputToken) {
+            // Case (a): direct payment from user.
+            //
+            // Legitimately reached only by the nested V3→V3 flow — the
+            // innermost input pool asks for the user's input token on V3.
+
+            if (tokenOwed == address(stablecoin)) {
+                revert DclexRouter__StablecoinNotAllowed();
+            }
+            if (amountOwed > ctx.maxInputAmount) {
+                revert DclexRouter__InputTooHigh();
+            }
+            IERC20(tokenOwed).safeTransferFrom(ctx.payer, msg.sender, amountOwed);
+        } else if (tokenOwed == address(stablecoin)) {
+            // Cases (b) and (c): produce stablecoin by swapping the input token
+            _produceStablecoinForV3Payment(ctx, amountOwed, msg.sender);
+        } else {
+            revert DclexRouter__InvalidCallback();
+        }
+    }
+
+    /// @notice stablecoin-production helper for the V3 callback
+    /// @dev Acquire `stablecoinAmount` of stablecoin and send it to `recipient`
+    /// @dev `recipient` is always the V3 pool that invoked uniswapV3SwapCallback.
+    function _produceStablecoinForV3Payment(
+        V3SwapCallbackData memory ctx,
+        uint256 stablecoinAmount,
+        address recipient
+    ) private {
+        PoolType inputType = stockPoolType[ctx.inputToken];
+        uint256 inputUsed;
+
+        if (inputType == PoolType.DCLEX) {
+            // --- Case (b): input token is on DCLEX ---
+            // Call the input DclexPool to sell the stock for stablecoin. Stablecoins go
+            // directly to `recipient` (the outer V3 pool). DclexPool will
+            // then call dclexSwapCallback on us; that callback sees
+            // payWithSwapExactOutput=false and pulls DCLEX tokens from
+            // ctx.payer via safeTransferFrom.
+            //
+            // `msg.value` is 0 inside this V3 callback, but the user's
+            // original msg.value is still on the router's balance because
+            // V3 pools never take ETH. Forwarding `address(this).balance`
+            // gives the nested DclexPool what it needs to pay the oracle fee
+            // inside its own updatePriceFeeds call.
+            inputUsed = stockToDclexPool[ctx.inputToken].swapExactOutput{
+                value: address(this).balance
             }(
-                true,
-                exactOutputAmount,
-                msg.sender,
-                callbackData,
-                pythUpdateData
+                false,                  // isBuy = false (selling stock for stablecoin)
+                stablecoinAmount,
+                recipient,              // stablecoin recipient = outer V3 pool
+                abi.encode(
+                    DclexSwapCallbackData({
+                        payer: ctx.payer,
+                        payWithSwapExactOutput: false,
+                        inputToken: address(0),
+                        maxInputAmount: 0
+                    })
+                ),
+                ctx.oracleData
             );
-        } else if (outputType == PoolType.AMM) {
-            _executeAMMOutputSwap(
-                inputToken,
-                outputToken,
-                exactOutputAmount,
-                maxInputAmount,
-                msg.sender,
-                pythUpdateData
+        } else if (inputType == PoolType.V3) {
+            // --- Case (c): input token is on V3 ---
+            // Nested V3 exact-output swap. Another uniswapV3SwapCallback will
+            // fire on the input pool; it resolves to case (a) because at that
+            // point the token owed will be ctx.inputToken itself.
+            address inputPoolAddr = stockToV3Pool[ctx.inputToken];
+            if (inputPoolAddr == address(0)) revert DclexRouter__UnknownToken();
+
+            // Build the nested callback context.
+            // Setting v3Token == inputToken makes the nested V3 callback
+            // authenticate against the input pool and hit case (a) — pull
+            // inputToken directly from the user.
+            V3SwapCallbackData memory nestedCtx = V3SwapCallbackData({
+                payer: ctx.payer,
+                inputToken: ctx.inputToken,
+                v3Token: ctx.inputToken,
+                maxInputAmount: ctx.maxInputAmount,
+                oracleData: ctx.oracleData
+            });
+
+            inputUsed = _v3NestedExactOutput(
+                IUniswapV3Pool(inputPoolAddr),
+                ctx.inputToken,
+                address(stablecoin),
+                stablecoinAmount,
+                recipient,
+                nestedCtx
             );
         } else {
             revert DclexRouter__UnknownToken();
         }
+
+        if (inputUsed > ctx.maxInputAmount) {
+            revert DclexRouter__InputTooHigh();
+        }
     }
 
-    // ============ Callback Data Helper ============
+    // ============================================================
+    // Low-level nested V3 swap (for case c)
+    // ============================================================
+    
+    // Single implementation. Caller is responsible for building the
+    // V3SwapCallbackData context. This keeps the function's job narrow:
+    // "execute a V3 exact-output swap and tell me how much input it used."
+    // ============================================================
 
-    function _encodeSwapCallback(
-        address payer,
-        bool payWithSwapExactOutput,
+    /// @notice Execute a V3 exact-output swap on `pool`
+    /// @param pool             The V3 pool to swap on
+    /// @param inputToken       Token being spent (used for zeroForOne determination)
+    /// @param outputToken      Token being received (usually stablecoin, but parameterized)
+    /// @param outputAmount     Exact amount of outputToken to receive
+    /// @param outputRecipient  Where the output token goes
+    /// @param ctx              Callback context; passed verbatim into the V3 callback
+    /// @return inputUsed       Amount of inputToken consumed by the swap
+    /// @dev The function is agnostic to what the V3 callback does with `ctx`.
+    ///      The caller decides whether the callback should hit case (a) (direct pull)
+    ///      by setting ctx.v3Token == ctx.inputToken, or produce payment some other way.
+    function _v3NestedExactOutput(
+        IUniswapV3Pool pool,
         address inputToken,
-        uint256 maxInputAmount
-    ) private pure returns (bytes memory) {
-        return
-            abi.encode(
-                DclexSwapCallbackData(
-                    payer,
-                    payWithSwapExactOutput,
-                    inputToken,
-                    maxInputAmount
-                )
-            );
+        address outputToken,
+        uint256 outputAmount,
+        address outputRecipient,
+        V3SwapCallbackData memory ctx
+    ) private returns (uint256 inputUsed) {
+        // V3 convention: zeroForOne=true means selling token0 for token1.
+        // Lower address is token0, so we're token0 iff inputToken < outputToken.
+        bool zeroForOne = inputToken < outputToken;
+
+        // Exact output is signaled by a negative amountSpecified
+        int256 amountSpecified = -int256(outputAmount);
+
+        // No price limit; slippage is enforced by the callback via ctx.maxInputAmount.
+        uint160 sqrtPriceLimitX96 = zeroForOne
+            ? TickMath.MIN_SQRT_RATIO + 1
+            : TickMath.MAX_SQRT_RATIO - 1;
+
+        (int256 amount0, int256 amount1) = pool.swap(
+            outputRecipient,
+            zeroForOne,
+            amountSpecified,
+            sqrtPriceLimitX96,
+            abi.encode(ctx)
+        );
+
+        // The positive delta is what we paid in (inputToken).
+        // If zeroForOne, inputToken is token0, so amount0 is positive.
+        inputUsed = zeroForOne ? uint256(amount0) : uint256(amount1);
     }
+
 
     // ============ V3 Swap Helpers ============
 
-    function _swapAMMToUsdcExactInput(
+    function _sellExactInputOnV3(
         address token,
         uint256 amount
     ) private returns (uint256) {
