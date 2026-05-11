@@ -409,36 +409,46 @@ contract DclexRouter is Ownable, ReentrancyGuard, IDclexSwapCallback {
         uint256 exactInputAmount,
         uint256 minOutputAmount,
         uint256 deadline,
-        bytes[] calldata pythUpdateData
-    ) external payable nonReentrant checkDeadline(deadline) {
-        uint256 usdcAmount;
+        bytes[] calldata oracleData
+    ) external payable nonReentrant checkDeadline(deadline) refundETH {
+        // stablecoin is the internal routing hop, never a user-facing leg here.
+        // Callers wanting stablecoin in/out must use buy/sell*Exact* instead.
+        if (
+            inputToken == address(stablecoin) || outputToken == address(stablecoin)
+        ) {
+            revert DclexRouter__StablecoinNotAllowed();
+        }
+
+        uint256 stablecoinAmount;
         uint256 outputAmount;
 
-        // Step 1: Input -> USDC
+        // Step 1: Input -> stablecoin
         PoolType inputType = stockPoolType[inputToken];
-        if (inputType == PoolType.CUSTOM) {
-            bytes memory callbackData = _encodeSwapCallback(
-                msg.sender,
-                false,
-                address(0),
-                0
+        if (inputType == PoolType.DCLEX) {
+            bytes memory callbackData = abi.encode(
+                DclexSwapCallbackData({
+                    payer: msg.sender,
+                    payWithSwapExactOutput: false,
+                    inputToken: address(0),
+                    maxInputAmount: 0
+                })
             );
-            usdcAmount = stockToCustomPool[inputToken].swapExactInput{
+            stablecoinAmount = stockToDclexPool[inputToken].swapExactInput{
                 value: msg.value
             }(
                 false,
                 exactInputAmount,
                 address(this),
                 callbackData,
-                pythUpdateData
+                oracleData
             );
-        } else if (inputType == PoolType.AMM) {
+        } else if (inputType == PoolType.V3) {
             IERC20(inputToken).safeTransferFrom(
                 msg.sender,
                 address(this),
                 exactInputAmount
             );
-            usdcAmount = _swapAMMToUsdcExactInput(
+            stablecoinAmount = _sellExactInputOnV3(
                 inputToken,
                 exactInputAmount
             );
@@ -446,26 +456,36 @@ contract DclexRouter is Ownable, ReentrancyGuard, IDclexSwapCallback {
             revert DclexRouter__UnknownToken();
         }
 
-        // Step 2: USDC -> Output
+        // Step 2: stablecoin -> Output
         PoolType outputType = stockPoolType[outputToken];
-        if (outputType == PoolType.CUSTOM) {
-            bytes memory callbackData = _encodeSwapCallback(
-                address(this),
-                false,
-                address(0),
-                0
+        if (outputType == PoolType.DCLEX) {
+            bytes memory callbackData = abi.encode(
+                DclexSwapCallbackData({
+                    payer: address(this),
+                    payWithSwapExactOutput: false,
+                    inputToken: address(0),
+                    maxInputAmount: 0
+                })
             );
-            outputAmount = stockToCustomPool[outputToken].swapExactInput(
+            // If step 1 was DCLEX, oracleData + msg.value were already
+            // consumed by the input pool (the shared oracle is now fresh, so
+            // the output pool reads it without needing its own update).
+            // If step 1 was V3, no oracle update has happened yet — forward
+            // both here so the output pool can run updatePriceFeeds itself.
+            bool outputNeedsUpdate = inputType == PoolType.V3;
+            outputAmount = stockToDclexPool[outputToken].swapExactInput{
+                value: outputNeedsUpdate ? msg.value : 0
+            }(
                 true,
-                usdcAmount,
+                stablecoinAmount,
                 msg.sender,
                 callbackData,
-                new bytes[](0)
+                outputNeedsUpdate ? oracleData : new bytes[](0)
             );
-        } else if (outputType == PoolType.AMM) {
-            outputAmount = _swapUsdcToAMMExactInput(
+        } else if (outputType == PoolType.V3) {
+            outputAmount = _buyExactInputOnV3(
                 outputToken,
-                usdcAmount,
+                stablecoinAmount,
                 msg.sender
             );
         } else {
