@@ -124,21 +124,28 @@ contract DclexRouter is Ownable, ReentrancyGuard, IDclexSwapCallback, IUniswapV3
 
     // ============ Pool Registry Functions ============
 
+    // Wipes whichever pool-type mapping was previously active for `token`
+    // so the registry can never end up with stale entries from a prior type.
+    function _clearStockRegistry(address token) private {
+        PoolType prev = stockPoolType[token];
+        if (prev == PoolType.DCLEX) {
+            address oldDclex = address(stockToDclexPool[token]);
+            if (oldDclex != address(0)) pools[oldDclex] = false;
+            delete stockToDclexPool[token];
+        } else if (prev == PoolType.V3) {
+            delete stockToV3Pool[token];
+            delete stockToFeeTier[token];
+        }
+        stockPoolType[token] = PoolType.NONE;
+    }
+
     function setDclexPool(address token, DclexPool pool) external onlyOwner {
         if (token == address(0)) revert DclexRouter__ZeroAddress();
+        _clearStockRegistry(token);
         if (address(pool) == address(0)) {
-            DclexPool oldPool = stockToDclexPool[token];
-            pools[address(oldPool)] = false;
-            stockPoolType[token] = PoolType.NONE;
-            delete stockToDclexPool[token];
             _removeFromStockTokens(token);
             emit PoolSetForToken(token, address(0), PoolType.NONE);
         } else {
-            // Clear old pool mapping if replacing
-            DclexPool oldPool = stockToDclexPool[token];
-            if (address(oldPool) != address(0)) {
-                pools[address(oldPool)] = false;
-            }
             pools[address(pool)] = true;
             stockPoolType[token] = PoolType.DCLEX;
             stockToDclexPool[token] = pool;
@@ -147,17 +154,14 @@ contract DclexRouter is Ownable, ReentrancyGuard, IDclexSwapCallback, IUniswapV3
         }
     }
 
-
     function setV3Pool(
         address token,
         address v3Pool,
         uint24 feeTier
     ) external onlyOwner {
         if (token == address(0)) revert DclexRouter__ZeroAddress();
+        _clearStockRegistry(token);
         if (v3Pool == address(0)) {
-            stockPoolType[token] = PoolType.NONE;
-            delete stockToV3Pool[token];
-            delete stockToFeeTier[token];
             _removeFromStockTokens(token);
             emit PoolSetForToken(token, address(0), PoolType.NONE);
         } else {
@@ -738,9 +742,8 @@ function swapExactOutput(
             abi.encode(ctx)
         );
 
-        // Sanity check: we should have received the full requested output.
-        // V3 can return slightly more than requested due to tick rounding,
-        // but not less.
+        // Defensive: V3 settles exact-output swaps at exactly the requested
+        // amount, but guard against a malformed pool returning less.
         int256 receivedOutput = zeroForOne ? -amount1 : -amount0;
         if (receivedOutput < int256(exactOutputAmount)) {
             revert DclexRouter__NoLiquidity();
