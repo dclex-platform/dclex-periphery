@@ -859,6 +859,92 @@ contract DclexRouterAMMTest is Test, IUniswapV3MintCallback {
         console.log("  AMMT1 spent:", ammt1Spent / 1e18);
     }
 
+    // ============ Single-leg V3 buy/sell coverage ============
+
+    function test_BuyOnV3_ExactInput() public {
+        uint256 stableIn = 100e6;
+        uint256 balanceBefore = ammStock1.balanceOf(USER_1);
+        vm.startPrank(USER_1);
+        usdcToken.approve(address(dclexRouter), stableIn);
+        dclexRouter.buyExactInput(
+            address(ammStock1),
+            stableIn,
+            0,
+            block.timestamp + 1,
+            new bytes[](0)
+        );
+        vm.stopPrank();
+        assertGt(ammStock1.balanceOf(USER_1), balanceBefore, "user should receive AMMT1");
+    }
+
+    function test_BuyOnV3_ExactOutput() public {
+        uint256 exactOut = 1e18;
+        uint256 maxIn = 1000e6;
+        uint256 balanceBefore = ammStock1.balanceOf(USER_1);
+        vm.startPrank(USER_1);
+        usdcToken.approve(address(dclexRouter), maxIn);
+        dclexRouter.buyExactOutput(
+            address(ammStock1),
+            exactOut,
+            maxIn,
+            block.timestamp + 1,
+            new bytes[](0)
+        );
+        vm.stopPrank();
+        assertEq(ammStock1.balanceOf(USER_1) - balanceBefore, exactOut, "user should receive exact AMMT1");
+    }
+
+    function test_SellOnV3_ExactInput() public {
+        uint256 ammIn = 1e18;
+        uint256 balanceBefore = usdcToken.balanceOf(USER_1);
+        vm.startPrank(USER_1);
+        ammStock1.approve(address(dclexRouter), ammIn);
+        dclexRouter.sellExactInput(
+            address(ammStock1),
+            ammIn,
+            0,
+            block.timestamp + 1,
+            new bytes[](0)
+        );
+        vm.stopPrank();
+        assertGt(usdcToken.balanceOf(USER_1), balanceBefore, "user should receive stablecoin");
+    }
+
+    function test_SellOnV3_ExactOutput() public {
+        uint256 stableOut = 10e6;
+        uint256 maxIn = 100e18;
+        uint256 balanceBefore = usdcToken.balanceOf(USER_1);
+        vm.startPrank(USER_1);
+        ammStock1.approve(address(dclexRouter), maxIn);
+        dclexRouter.sellExactOutput(
+            address(ammStock1),
+            stableOut,
+            maxIn,
+            block.timestamp + 1,
+            new bytes[](0)
+        );
+        vm.stopPrank();
+        assertEq(usdcToken.balanceOf(USER_1) - balanceBefore, stableOut, "user should receive exact stablecoin");
+    }
+
+    function test_CrossPool_AMMToCustom_SwapExactOutput() public {
+        uint256 exactOut = 1e18;
+        uint256 maxIn = 100e18;
+        uint256 aaplBefore = aaplStock.balanceOf(USER_1);
+        vm.startPrank(USER_1);
+        ammStock1.approve(address(dclexRouter), maxIn);
+        dclexRouter.swapExactOutput(
+            address(ammStock1),
+            address(aaplStock),
+            exactOut,
+            maxIn,
+            block.timestamp + 1,
+            new bytes[](0)
+        );
+        vm.stopPrank();
+        assertEq(aaplStock.balanceOf(USER_1) - aaplBefore, exactOut, "user should receive exact AAPL");
+    }
+
     /// @notice With Quoter, exact-output on both legs means only needed input is consumed
     function test_SwapExactOutput_RefundsExcessInput() public {
         // Test that excess input tokens are refunded when maxInput > actual needed

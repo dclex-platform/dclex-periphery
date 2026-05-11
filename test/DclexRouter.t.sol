@@ -1333,4 +1333,39 @@ contract DclexRouterTest is Test, TestBalance {
             PRICE_DATA
         );
     }
+
+    /// @notice DCLEX→DCLEX exact-output happy path: caller receives exactly
+    /// the requested NVDA, spends less than max AAPL, slippage enforced.
+    function testSwapExactOutputStockToStockDeliversExactOutput() external {
+        uint256 nvdaBefore = nvdaStock.balanceOf(USER_1);
+        uint256 aaplBefore = aaplStock.balanceOf(USER_1);
+
+        vm.prank(USER_1);
+        dclexRouter.swapExactOutput(
+            address(aaplStock),
+            address(nvdaStock),
+            1 ether,
+            10 ether,
+            block.timestamp + 1,
+            PRICE_DATA
+        );
+
+        assertEq(nvdaStock.balanceOf(USER_1) - nvdaBefore, 1 ether, "exact NVDA out");
+        uint256 aaplSpent = aaplBefore - aaplStock.balanceOf(USER_1);
+        assertGt(aaplSpent, 0, "some AAPL spent");
+        assertLt(aaplSpent, 10 ether, "less than max input");
+    }
+
+    function testSwapExactOutputStockToStockRevertsWhenInputAboveMax() external {
+        vm.prank(USER_1);
+        vm.expectRevert(DclexRouter.DclexRouter__InputTooHigh.selector);
+        dclexRouter.swapExactOutput(
+            address(aaplStock),
+            address(nvdaStock),
+            1 ether,
+            1, // 1 wei max → impossible
+            block.timestamp + 1,
+            PRICE_DATA
+        );
+    }
 }
