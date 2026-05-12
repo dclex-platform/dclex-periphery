@@ -86,28 +86,11 @@ contract DeployAMMStocks is Script {
         _usdc = IERC20(usdcAddr);
         _did = DigitalIdentity(address(_factory.getDID()));
 
-        // Check if V3 infrastructure exists via router
-        ISwapRouter existingRouter = _router.v3SwapRouter();
-
+        // V3 infrastructure for liquidity minting. The DclexRouter no longer
+        // owns a SwapRouter (it calls pool.swap() directly), so this script
+        // always deploys its own V3 factory + SwapRouter for liquidity adds.
         address swapRouterAddr;
-        if (address(existingRouter) == address(0)) {
-            console.log("V3 infrastructure not found, deploying...");
-            (_v3Factory, swapRouterAddr) = _deployV3Infrastructure();
-        } else {
-            console.log(
-                "Using existing V3 SwapRouter:",
-                address(existingRouter)
-            );
-            swapRouterAddr = address(existingRouter);
-            // Use the SAME factory that the SwapRouter uses (critical for routing to work)
-            _v3Factory = IUniswapV3Factory(
-                SwapRouter(payable(swapRouterAddr)).factory()
-            );
-            console.log("Using existing V3 Factory:", address(_v3Factory));
-            // Get wDEL address from SwapRouter's WETH9
-            _weth = SwapRouter(payable(swapRouterAddr)).WETH9();
-            console.log("Using existing wDEL:", _weth);
-        }
+        (_v3Factory, swapRouterAddr) = _deployV3Infrastructure();
 
         // Deploy liquidity helper contract
         vm.startBroadcast();
@@ -213,11 +196,11 @@ contract DeployAMMStocks is Script {
 
         vm.stopBroadcast();
 
-        // Register wDEL with router as AMM pool so it appears in allStockTokens()
+        // Register wDEL with router as V3 pool so it appears in allStockTokens()
         // Do this BEFORE liquidity so even if liquidity fails, wDEL is registered
         vm.startBroadcast();
-        _router.setAMMPool(_weth, poolAddr, 3000);
-        console.log("Registered wDEL with router as AMM pool");
+        _router.setV3Pool(_weth, poolAddr, 3000);
+        console.log("Registered wDEL with router as V3 pool");
         vm.stopBroadcast();
 
         _addWdelLiquidity(poolAddr);
@@ -433,9 +416,9 @@ contract DeployAMMStocks is Script {
         _factory.forceMintStablecoin("dUSD", address(_liquidityHelper), usdcNeeded);
         console.log("Minted dUSD to liquidity helper:", usdcNeeded);
 
-        // 5. Register with router as AMM pool
-        _router.setAMMPool(stockAddr, poolAddr, 3000);
-        console.log("Registered AMM pool for", symbol);
+        // 5. Register with router as V3 pool
+        _router.setV3Pool(stockAddr, poolAddr, 3000);
+        console.log("Registered V3 pool for", symbol);
         vm.stopBroadcast();
 
         // 6. Add two-sided liquidity around current price

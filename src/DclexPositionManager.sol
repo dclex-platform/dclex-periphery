@@ -9,9 +9,9 @@ import {
 } from "dclex-blockchain/contracts/interfaces/IDID.sol";
 
 /// @title DclexPositionManager
-/// @notice Extends NonfungiblePositionManager with DID verification on NFT transfers.
-/// Only addresses with valid DID can hold V3 liquidity position NFTs.
-/// Mints and burns are exempt (from=0 or to=0).
+/// @notice Extends NonfungiblePositionManager with DID gating: mints require
+///         the recipient to hold a valid DID; transfers require both sides;
+///         burns are exempt.
 contract DclexPositionManager is NonfungiblePositionManager {
     IDID public immutable did;
 
@@ -26,19 +26,22 @@ contract DclexPositionManager is NonfungiblePositionManager {
         did = _did;
     }
 
-    /// @notice Override _update to verify DID on transfers (not mints/burns)
+    // OZ 5.x exposes only `_update` as virtual on ERC721 — `_mint`/`_transfer`
+    // are non-virtual, so DID checks must happen here.
     function _update(
         address to,
         uint256 tokenId,
         address auth
     ) internal override returns (address from) {
         from = super._update(to, tokenId, auth);
-
-        // Skip DID check for mints (from=0) and burns (to=0)
-        if (from != address(0) && to != address(0)) {
-            if (!did.verifyTransfer(from, to)) {
-                revert DclexPositionManager__TransferNotAllowed();
-            }
+        if (to == address(0)) {
+            return from;
+        }
+        bool allowed = from == address(0)
+            ? did.isValid(did.getId(to))
+            : did.verifyTransfer(from, to);
+        if (!allowed) {
+            revert DclexPositionManager__TransferNotAllowed();
         }
     }
 }

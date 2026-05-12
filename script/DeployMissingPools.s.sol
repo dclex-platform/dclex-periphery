@@ -11,7 +11,7 @@ import {DclexPool} from "dclex-protocol/src/DclexPool.sol";
 import {IPriceOracle} from "dclex-protocol/src/IPriceOracle.sol";
 import {FIOracle} from "dclex-protocol/src/FIOracle.sol";
 interface IDclexRouter {
-    function setPool(address token, address pool) external;
+    function setDclexPool(address token, address pool) external;
 }
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
@@ -263,7 +263,7 @@ contract DeployMissingPools is Script {
 
             // Register pool + mint DID + set fee curve with admin
             vm.startBroadcast(adminKey);
-            dclexRouter.setPool(stockAddress, address(dclexPool));
+            dclexRouter.setDclexPool(stockAddress, address(dclexPool));
             digitalIdentity.mintAdmin(address(dclexPool), 2, bytes32(0));
             // Apply default fee curve so platform fee is always set after deploy
             dclexPool.setFeeCurve(0.01 ether, 0.001 ether);

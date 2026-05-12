@@ -161,7 +161,7 @@ contract RedeployFIOracleAndPools is Script {
         }
         for (uint256 i = 0; i < stocks.length; i++) {
             address stockAddr = factory.stocks(stocks[i].symbol);
-            router.setCustomPool(stockAddr, DclexPool(newPools[i]));
+            router.setDclexPool(stockAddr, DclexPool(newPools[i]));
         }
         factory.forceMintStablecoin(DUSD_SYMBOL, vm.addr(adminKey), DUSD_AMOUNT * stocks.length);
         // Pin block.timestamp once for the whole init loop. Forge's

@@ -8,8 +8,6 @@ import {
     DigitalIdentity
 } from "dclex-blockchain/contracts/dclex/DigitalIdentity.sol";
 import {Factory} from "dclex-blockchain/contracts/dclex/Factory.sol";
-import {ISwapRouter} from "@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
-import {IQuoter} from "@uniswap/v3-periphery/contracts/interfaces/IQuoter.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 interface IRouter {
@@ -22,8 +20,6 @@ interface IRouter {
 contract RedeployRouter is Script {
     address constant CURRENT_ROUTER =
         0xfF545934344DbD71DdD177428E5FE9342D57A879;
-    address constant V3_SWAP_ROUTER = 0x0000000000000000000000000000000000000000; // TODO: Set after V3 deployment
-    address constant V3_QUOTER = 0x0000000000000000000000000000000000000000; // TODO: Set after V3 deployment
     address constant DUSD = 0x951c4871D16d953a3Fd64c17a756B1aA95D63E58;
     address constant FACTORY = 0x5d360D437c9bEd63B149435b11f5c5c5d41bb549;
     address constant ADMIN = 0x70997970C51812dc3A010C7d01b50e0d17dc79C8;
@@ -79,27 +75,23 @@ contract RedeployRouter is Script {
     }
 
     function run() external {
-        run(ISwapRouter(V3_SWAP_ROUTER), IQuoter(V3_QUOTER));
+        runInternal();
     }
 
-    function run(ISwapRouter v3SwapRouter, IQuoter v3Quoter) public {
+    function runInternal() public {
         IRouter currentRouter = IRouter(CURRENT_ROUTER);
         address[] memory tokens = getCanonicalTokens();
 
         vm.startBroadcast();
 
-        DclexRouter newRouter = new DclexRouter(
-            v3SwapRouter,
-            v3Quoter,
-            IERC20(DUSD)
-        );
+        DclexRouter newRouter = new DclexRouter(IERC20(DUSD));
         console.log("New DclexRouter deployed at:", address(newRouter));
 
         for (uint256 i = 0; i < tokens.length; i++) {
             address token = tokens[i];
             address pool = currentRouter.stockTokenToPool(token);
             require(pool != address(0), "Pool not found for token");
-            newRouter.setPool(token, DclexPool(pool));
+            newRouter.setDclexPool(token, DclexPool(pool));
         }
         console.log("Registered", tokens.length, "pools");
 
