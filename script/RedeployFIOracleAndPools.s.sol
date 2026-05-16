@@ -145,8 +145,10 @@ contract RedeployFIOracleAndPools is Script {
                 dusdToken,
                 IPriceOracle(address(fiOracle)),
                 stocks[i].priceFeedId,
-                ADMIN,
-                MAX_PRICE_STALENESS
+                MAX_PRICE_STALENESS,
+                0.00025 ether,
+                0.009 ether,
+                ADMIN
             );
             newPools[i] = address(pool);
         }
