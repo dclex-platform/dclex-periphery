@@ -256,8 +256,10 @@ contract DeployMissingPools is Script {
                 dusdToken,
                 oracle,
                 priceFeedId,
-                ADMIN,
-                MAX_PRICE_STALENESS
+                MAX_PRICE_STALENESS,
+                0.00025 ether,
+                0.009 ether,
+                ADMIN
             );
             vm.stopBroadcast();
 
