@@ -40,27 +40,22 @@ contract BatchPoolDeployer {
         DigitalIdentity digitalIdentity = DigitalIdentity(address(params.factory.getDID()));
         digitalIdentity.mintAdmin(address(params.router), 2, bytes32(0));
 
+        uint256 feeCurveA = DEFAULT_SENSITIVITY / 4;
+        uint256 feeCurveB = DEFAULT_BASE_FEE_RATE - DEFAULT_SENSITIVITY;
+
         for (uint256 i = 0; i < params.stockAddresses.length; i++) {
             if (params.stockAddresses[i] == address(0)) continue;
 
-            // Deploy pool with THIS contract as temporary admin so we can
-            // configure the fee curve in the same transaction.
             DclexPool pool = new DclexPool(
                 IStock(params.stockAddresses[i]),
                 params.usdcToken,
                 params.oracle,
                 params.priceFeedIds[i],
-                address(this),
-                params.maxPriceStaleness
+                params.maxPriceStaleness,
+                feeCurveA,
+                feeCurveB,
+                params.finalOwner
             );
-
-            // Apply default fee curve — ensures every deployed pool always
-            // starts with a non-zero platform fee without any manual step.
-            pool.setFeeCurve(DEFAULT_BASE_FEE_RATE, DEFAULT_SENSITIVITY);
-
-            // Hand over admin rights to the final owner and renounce ours.
-            IAccessControl(address(pool)).grantRole(DEFAULT_ADMIN_ROLE, params.finalOwner);
-            IAccessControl(address(pool)).renounceRole(DEFAULT_ADMIN_ROLE, address(this));
 
             params.router.setDclexPool(params.stockAddresses[i], pool);
             digitalIdentity.mintAdmin(address(pool), 2, bytes32(0));
